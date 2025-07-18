@@ -12,7 +12,7 @@ import uuid
 from abc import ABC, abstractmethod
 from asyncio import Lock
 from contextlib import contextmanager, asynccontextmanager
-from typing import TYPE_CHECKING, Callable, TypeVar, Generator, Tuple, Dict, List, ContextManager
+from typing import TYPE_CHECKING, Callable, TypeVar, Generator, Tuple, Dict, List, ContextManager, AsyncGenerator
 
 import aiohttp
 import docker
@@ -343,22 +343,32 @@ class DownloadedFile:
         return file_ext(self.dl_path)
 
 
+async def _download_file(url: str) -> DownloadedFile:
+    dl_path = temp_sandbox_path(file_ext(url))
+    with time_taken_downloading_image.time():
+        session = aiohttp.ClientSession()
+        dl_filesize = 0
+        async with session.get(url) as resp:
+            try:
+                resp.raise_for_status()
+            except ClientResponseError as e:
+                raise DownloadError(url, e)
+            with open(dl_path, "wb") as f:
+                async for chunk in resp.content.iter_chunked(8192):
+                    f.write(chunk)
+                    dl_filesize += len(chunk)
+    return DownloadedFile(dl_path, dl_filesize)
+
+
 @asynccontextmanager
-async def _downloaded_file(url: str) -> Generator[DownloadedFile, None, None]:
-    with temp_sandbox_file(file_ext(url)) as dl_path:
-        with time_taken_downloading_image.time():
-            session = aiohttp.ClientSession()
-            dl_filesize = 0
-            async with session.get(url) as resp:
-                try:
-                    resp.raise_for_status()
-                except ClientResponseError as e:
-                    raise DownloadError(url, e)
-                with open(dl_path, "wb") as f:
-                    async for chunk in resp.content.iter_chunked(8192):
-                        f.write(chunk)
-                        dl_filesize += len(chunk)
-        yield DownloadedFile(dl_path, dl_filesize)
+async def _downloaded_file(url: str) -> AsyncGenerator[DownloadedFile, None, None]:
+    dl_file = None
+    try:
+        dl_file = await _download_file(url)
+        yield dl_file
+    finally:
+        if dl_file is not None:
+            try_delete_sandbox_file(dl_file.dl_path)
 
 
 def _img_has_transparency(img: Image) -> bool:
