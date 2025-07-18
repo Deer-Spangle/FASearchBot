@@ -301,17 +301,31 @@ def file_ext(file_path: str) -> str:
     return file_path.split(".")[-1].lower()
 
 
+def clean_sandbox() -> None:
+    shutil.rmtree(SANDBOX_DIR, ignore_errors=True)
+
+
+def temp_sandbox_path(ext: str = "mp4") -> str:
+    os.makedirs(SANDBOX_DIR, exist_ok=True)
+    return f"{SANDBOX_DIR}/{uuid.uuid4()}.{ext}"
+
+
+def try_delete_sandbox_file(file_path: str) -> None:
+    if os.path.commonpath([SANDBOX_DIR, file_path]) != SANDBOX_DIR:
+        raise ValueError("Can only delete files in sandbox directory")
+    try:
+        os.remove(file_path)
+    except FileNotFoundError:
+        pass
+
+
 @contextmanager
 def temp_sandbox_file(ext: str = "mp4") -> Generator[str, None, None]:
-    os.makedirs(SANDBOX_DIR, exist_ok=True)
-    temp_path = f"{SANDBOX_DIR}/{uuid.uuid4()}.{ext}"
+    temp_path = temp_sandbox_path(ext=ext)
     try:
         yield temp_path
     finally:
-        try:
-            os.remove(temp_path)
-        except FileNotFoundError:
-            pass
+        try_delete_sandbox_file(temp_path)
 
 
 class DownloadError(Exception):
