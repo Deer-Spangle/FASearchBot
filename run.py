@@ -45,19 +45,22 @@ def setup_logging(log_level: str = "INFO") -> None:
 @click.option("--log-level", type=str, help="Log level for the logger", default="INFO")
 @click.option("--no-subscriptions", type=bool, default=False, help="Disable subscription watcher")
 @click.option("--sub-watcher-data-fetchers", type=int, default=2, help="Number of DataFetcher tasks which should spin up in the subscription watcher")
-@click.option("--sub-watcher-media-fetchers", type=int, default=2, help="Number of MediaFetcher tasks which should spin up in the subscription watcher")
+@click.option("--sub-watcher-media-downloaders", type=int, default=2, help="Number of MediaDownloader tasks which should spin up in the subscription watcher")
+@click.option("--sub-watcher-media-uploaders", type=int, default=2, help="Number of MediaUploader tasks which should spin up in the subscription watcher")
 def main(
         log_level: str,
         no_subscriptions: bool,
         sub_watcher_data_fetchers: int,
-        sub_watcher_media_fetchers: int,
+        sub_watcher_media_downloaders: int,
+        sub_watcher_media_uploaders: int,
 ) -> None:
     setup_logging(log_level)
     # Construct config and ingest flags
     config = Config.load_from_file(os.getenv('CONFIG_FILE', 'config.json'))
     config.subscription_watcher.enabled = not no_subscriptions
     config.subscription_watcher.num_data_fetchers = sub_watcher_data_fetchers
-    config.subscription_watcher.num_media_fetchers = sub_watcher_media_fetchers
+    config.subscription_watcher.num_media_downloaders = sub_watcher_media_downloaders
+    config.subscription_watcher.num_media_uploaders = sub_watcher_media_uploaders
     # Create and start the bot
     bot = FASearchBot(config)
     loop = asyncio.get_event_loop()
