@@ -1017,7 +1017,7 @@ class Sendable(InlineSendable):
                     if container.status == "exited":
                         output = container.logs()
                         container.remove(force=True)
-                        return output
+                        return output.decode("utf-8")
                     await asyncio.sleep(2)
                 # Kill container
                 logger.warning("Docker timed out, killing container.")
