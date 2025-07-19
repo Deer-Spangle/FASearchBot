@@ -30,6 +30,11 @@ total_processed_count = Counter(
     "Count of how many times a task type has run its processing method",
     labelnames=["runnable"],
 )
+time_taken_processing = Summary(
+    "fasearchbot_subscriptiontask_do_process_time_taken",
+    "Amount of time taken (in seconds) running the do_process() method on each task runner",
+    labelnames=["runnable"],
+)
 
 
 class ShutdownError(RuntimeError):
@@ -54,13 +59,15 @@ class Runnable(ABC):
         )
         self.runnable_latest_processed = latest_processed_time.labels(runnable=self.class_name)
         self.runnable_processed_count = total_processed_count.labels(runnable=self.class_name)
+        self.time_taken_processing = time_taken_processing.labels(runnable=self.class_name)
 
     async def run(self) -> None:
         # Start the subscription task
         self.running = True
         while self.running:
             try:
-                await self.do_process()
+                with time_taken_processing.time():
+                    await self.do_process()
             except Exception as e:
                 logger.error("Runnable task %s has failed (will restart) with exception:", self.class_name, exc_info=e)
                 # Revert the failed attempt, so it may be attempted again
