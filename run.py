@@ -46,7 +46,7 @@ def setup_logging(log_level: str = "INFO") -> None:
 @click.option("--no-subscriptions", type=bool, default=False, help="Disable subscription watcher")
 @click.option("--sub-watcher-data-fetchers", type=int, default=2, help="Number of DataFetcher tasks which should spin up in the subscription watcher")
 @click.option("--sub-watcher-media-downloaders", type=int, default=2, help="Number of MediaDownloader tasks which should spin up in the subscription watcher")
-@click.option("--sub-watcher-media-uploaders", type=int, default=2, help="Number of MediaUploader tasks which should spin up in the subscription watcher")
+@click.option("--sub-watcher-media-uploaders", type=int, default=1, help="Number of MediaUploader tasks which should spin up in the subscription watcher")
 def main(
         log_level: str,
         no_subscriptions: bool,
