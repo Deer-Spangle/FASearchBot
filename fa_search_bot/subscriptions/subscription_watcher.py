@@ -12,11 +12,12 @@ from typing import TYPE_CHECKING
 from prometheus_client import Gauge
 
 from fa_search_bot.config import SubscriptionWatcherConfig
+from fa_search_bot.subscriptions.media_downloader import MediaDownloader
+from fa_search_bot.subscriptions.media_uploader import MediaUploader
 from fa_search_bot.subscriptions.runnable import ShutdownError
 from fa_search_bot.subscriptions.query_parser import parse_query, Query, AndQuery, NotQuery
 from fa_search_bot.sites.submission_id import SubmissionID
 from fa_search_bot.subscriptions.data_fetcher import DataFetcher
-from fa_search_bot.subscriptions.media_fetcher import MediaFetcher
 from fa_search_bot.subscriptions.sender import Sender
 from fa_search_bot.subscriptions.sub_id_gatherer import SubIDGatherer
 from fa_search_bot.subscriptions.subscription import Subscription
@@ -72,13 +73,21 @@ gauge_expected_data_fetcher_count = Gauge(
     "fasearchbot_fasubwatcher_expected_data_fetcher_count",
     "Number of expected data fetcher tasks which should be running",
 )
-gauge_running_media_fetcher_count = Gauge(
-    "fasearchbot_fasubwatcher_running_media_fetcher_count",
-    "Number of running media fetcher tasks",
+gauge_running_media_downloader_count = Gauge(
+    "fasearchbot_fasubwatcher_running_media_downloader_count",
+    "Number of running media downloader tasks",
 )
-gauge_expected_media_fetcher_count = Gauge(
-    "fasearchbot_fasubwatcher_expected_media_fetcher_count",
-    "Number of expected media fetcher tasks which should be running",
+gauge_expected_media_downloader_count = Gauge(
+    "fasearchbot_fasubwatcher_expected_media_downloader_count",
+    "Number of expected media downloader tasks which should be running",
+)
+gauge_running_media_uploader_count = Gauge(
+    "fasearchbot_fasubwatcher_running_media_uploader_count",
+    "Number of running media uploader tasks",
+)
+gauge_expected_media_uploader_count = Gauge(
+    "fasearchbot_fasubwatcher_expected_media_uploader_count",
+    "Number of expected media uploader tasks which should be running",
 )
 gauge_running_task_count = Gauge(
     "fasearchbot_fasubwatcher_running_task_count",
@@ -122,8 +131,9 @@ class SubscriptionWatcher:
 
         # Initialise runners and tasks
         self.sub_id_gatherer: Optional[SubIDGatherer] = None
-        self.data_fetchers: List[DataFetcher] = []
-        self.media_fetchers: List[MediaFetcher] = []
+        self.data_fetchers: list[DataFetcher] = []
+        self.media_downloaders: list[MediaDownloader] = []
+        self.media_uploaders: list[MediaUploader] = []
         self.sender: Optional[Sender] = None
         self.sub_tasks: List[Task] = []
 
@@ -142,10 +152,12 @@ class SubscriptionWatcher:
         gauge_upload_queue_size.set_function(lambda: self.wait_pool.qsize_upload())
         gauge_running_data_fetcher_count.set_function(lambda: len([f for f in self.data_fetchers if f.running]))
         gauge_expected_data_fetcher_count.set(self.config.num_data_fetchers)
-        gauge_running_media_fetcher_count.set_function(lambda: len([f for f in self.media_fetchers if f.running]))
-        gauge_expected_media_fetcher_count.set(self.config.num_media_fetchers)
+        gauge_running_media_downloader_count.set_function(lambda: len([f for f in self.media_downloaders if f.running]))
+        gauge_expected_media_downloader_count.set(self.config.num_media_downloaders)
+        gauge_running_media_uploader_count.set_function(lambda: len([f for f in self.media_uploaders if f.running]))
+        gauge_expected_media_uploader_count.set(self.config.num_media_uploaders)
         gauge_running_task_count.set_function(lambda: len([t for t in self.sub_tasks if not t.done()]))
-        gauge_expected_task_count.set(2 + self.config.num_data_fetchers + self.config.num_media_fetchers)
+        gauge_expected_task_count.set(2 + self.config.total_num_task_runners())
 
     def start_tasks(self) -> None:
         if self.sub_tasks:
@@ -161,12 +173,18 @@ class SubscriptionWatcher:
             self.data_fetchers.append(data_fetcher)
             data_fetcher_task = event_loop.create_task(data_fetcher.run())
             self.sub_tasks.append(data_fetcher_task)
-        # Start the media fetchers
-        for _ in range(self.config.num_media_fetchers):
-            media_fetcher = MediaFetcher(self)
-            self.media_fetchers.append(media_fetcher)
-            media_fetcher_task = event_loop.create_task(media_fetcher.run())
-            self.sub_tasks.append(media_fetcher_task)
+        # Start the media downloaders
+        for _ in range(self.config.num_media_downloaders):
+            media_downloader = MediaDownloader(self)
+            self.media_downloaders.append(media_downloader)
+            media_downloader_task = event_loop.create_task(media_downloader.run())
+            self.sub_tasks.append(media_downloader_task)
+        # Start the media uploaders
+        for _ in range(self.config.num_media_uploaders):
+            media_uploader = MediaUploader(self)
+            self.media_uploaders.append(media_uploader)
+            media_uploader_task = event_loop.create_task(media_uploader.run())
+            self.sub_tasks.append(media_uploader_task)
         # Start the submission sender
         self.sender = Sender(self)
         task_sender = event_loop.create_task(self.sender.run())
@@ -181,9 +199,12 @@ class SubscriptionWatcher:
         for data_fetcher in self.data_fetchers:
             logger.debug("Stopping data fetcher")
             data_fetcher.stop()
-        for media_fetcher in self.media_fetchers:
-            logger.debug("Stopping media fetcher")
-            media_fetcher.stop()
+        for media_downloader in self.media_downloaders:
+            logger.debug("Stopping media downloader")
+            media_downloader.stop()
+        for media_uploader in self.media_uploaders:
+            logger.debug("Stopping media uploader")
+            media_uploader.stop()
         if self.sender:
             logger.debug("Stopping sender")
             self.sender.stop()
@@ -201,7 +222,8 @@ class SubscriptionWatcher:
             self.sub_tasks.remove(task)
         # Clean up fetchers
         self.data_fetchers.clear()
-        self.media_fetchers.clear()
+        self.media_downloaders.clear()
+        self.media_uploaders.clear()
         logger.info("Subscription watcher shutdown complete")
 
     def update_latest_observed(self, post_datetime: datetime.datetime) -> None:
