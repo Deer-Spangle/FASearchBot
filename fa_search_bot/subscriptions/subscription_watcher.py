@@ -127,7 +127,7 @@ class SubscriptionWatcher:
         self.blocklist_query_cache: Dict[str, Query] = dict()
 
         # Initialise sharing data structures
-        self.wait_pool = WaitPool()
+        self.wait_pool = WaitPool(self.config.max_ready_for_upload)
 
         # Initialise runners and tasks
         self.sub_id_gatherer: Optional[SubIDGatherer] = None

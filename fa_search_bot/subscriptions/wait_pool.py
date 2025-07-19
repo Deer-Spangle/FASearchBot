@@ -7,6 +7,7 @@ from typing import Optional, Dict, Union
 
 from telethon.tl.types import TypeInputPeer
 
+from fa_search_bot.config import DEFAULT_MAX_READY_FOR_UPLOAD
 from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull
 from fa_search_bot.sites.sendable import UploadedMedia, DownloadedFile, SendSettings
 from fa_search_bot.sites.sent_submission import SentSubmission
@@ -55,9 +56,8 @@ class WaitPool:
     The sender is watching for the next item in the pool which is ready to send
     """
 
-    MAX_READY_FOR_UPLOAD = 100  # Maximum number of submissions which should be ready for media upload, to prevent data being too stale by the time it comes to upload, especially if catching up on backlog
-
-    def __init__(self):
+    def __init__(self, max_ready_for_upload: int = DEFAULT_MAX_READY_FOR_UPLOAD) -> None:
+        self.max_ready_for_upload = max_ready_for_upload
         self.submission_state: Dict[SubmissionID, SubmissionCheckState] = {}
         self.fetch_data_queue: FetchQueue = FetchQueue()
         self._lock = Lock()
@@ -76,7 +76,7 @@ class WaitPool:
         return len(self.states_ready_for_media_download()) + len(self.states_ready_for_media_upload())
 
     async def set_fetched_data(self, sub_id: SubmissionID, full_data: FASubmissionFull) -> None:
-        while self.count_fetched_not_uploaded() > self.MAX_READY_FOR_UPLOAD:
+        while self.count_fetched_not_uploaded() > self.max_ready_for_upload:
             logger.debug("Waiting for media uploads to get below submission count limit")
             await self._media_uploading_event.wait()
         async with self._lock:
