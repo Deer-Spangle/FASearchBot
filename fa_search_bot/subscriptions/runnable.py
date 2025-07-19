@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 import heartbeat
-from prometheus_client import Gauge, Counter
+from prometheus_client import Gauge, Counter, Summary
 
 from fa_search_bot.subscriptions.utils import time_taken
 
