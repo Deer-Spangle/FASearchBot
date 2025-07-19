@@ -66,7 +66,7 @@ class Runnable(ABC):
         self.running = True
         while self.running:
             try:
-                with time_taken_processing.time():
+                with self.time_taken_processing.time():
                     await self.do_process()
             except Exception as e:
                 logger.error("Runnable task %s has failed (will restart) with exception:", self.class_name, exc_info=e)
