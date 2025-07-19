@@ -12,12 +12,12 @@ import uuid
 from abc import ABC, abstractmethod
 from asyncio import Lock
 from contextlib import contextmanager, asynccontextmanager
-from typing import TYPE_CHECKING, Callable, TypeVar, Generator, Tuple, Dict, List, ContextManager, AsyncGenerator
+from typing import TYPE_CHECKING, Callable, TypeVar, Generator, Tuple, Dict, List, AsyncGenerator
 
 import aiohttp
 import docker
 from PIL import Image, UnidentifiedImageError, ImageFile
-from aiohttp import ClientError, ClientResponseError
+from aiohttp import ClientResponseError
 from prometheus_client import Counter, Summary
 from prometheus_client.metrics import Histogram
 from telethon import Button
@@ -394,7 +394,7 @@ IMG_EDIT_LOCK = Lock()
 
 
 @asynccontextmanager
-async def open_image(img_path: str, *, load_truncated: bool = False) -> ContextManager[Image]:
+async def open_image(img_path: str, *, load_truncated: bool = False) -> AsyncGenerator[Image]:
     async with IMG_EDIT_LOCK:
         try:
             ImageFile.LOAD_TRUNCATED_IMAGES = load_truncated
@@ -505,7 +505,8 @@ class Sendable(InlineSendable):
     ]  # These should be converted to mp4, without sound, if they are animated
     EXTENSIONS_VIDEO = ["webm"]  # These should be converted to mp4, with sound
 
-    EXTENSIONS_AUTO_DOCUMENT = ["pdf"]  # Telegram can embed these as documents
+    EXTENSIONS_AUTO_DOCUMENT = ["pdf"]  # Telegram can embed these as documents automatically from the URL
+    EXTENSIONS_PDF = ["pdf"]  # Telegram can embed these as documents
     EXTENSIONS_AUDIO = ["mp3"]  # Telegram can embed these as audio
     EXTENSIONS_PHOTO = ["jpg", "jpeg"]  # Telegram can embed these as images
     # Maybe use these for labels
@@ -607,53 +608,85 @@ class Sendable(InlineSendable):
             return sent_sub
         return send_partial
 
-    async def upload(self, client: TelegramClient) -> UploadedMedia:
+    async def download(self) -> tuple[DownloadedFile, SendSettings]:
         settings = SendSettings(CaptionSettings())
         ext = self.download_file_ext
 
-        # Handle potentially animated formats
-        if ext in self.EXTENSIONS_ANIMATED:
-            async with _downloaded_file(self.download_url) as dl_file:
-                if await self._is_animated(dl_file.dl_path):
-                    return await self._upload_video(client, dl_file, settings)
-                else:
-                    return await self._upload_image(client, dl_file, settings)
-        # Handle photos
-        if ext in self.EXTENSIONS_PHOTO:
-            async with _downloaded_file(self.download_url) as dl_file:
-                return await self._upload_image(client, dl_file, settings)
-        # Handle videos, which can be made pretty
-        if ext in self.EXTENSIONS_VIDEO:
-            async with _downloaded_file(self.download_url) as dl_file:
-                sendable_animated.labels(site_code=self.site_id).inc()
-                return await self._upload_video(client, dl_file, settings)
+        # Handle potentially animated formats, photos, and videos
+        if ext in self.EXTENSIONS_ANIMATED + self.EXTENSIONS_PHOTO + self.EXTENSIONS_VIDEO:
+            return await _download_file(self.download_url), settings
         # Everything else is a file, send with title and author
         settings.caption.title = True
         settings.caption.author = True
-        # Special handling, if it's small enough
+        # Special handling, if it's within telegram file size limits
         with time_taken_fetching_filesize.time():
             dl_filesize = await self.download_file_size()
         if dl_filesize < self.SIZE_LIMIT_DOCUMENT:
             # Handle pdfs, which can be sent as documents
             if ext in self.EXTENSIONS_AUTO_DOCUMENT:
                 settings.force_doc = True
-                return UploadedMedia(self.submission_id, _url_to_media(self.download_url, False), settings)
+                return await _download_file(self.download_url), settings
             # Handle audio
             if ext in self.EXTENSIONS_AUDIO:
-                async with _downloaded_file(self.download_url) as dl_file:
-                    return await self._upload_audio(client, dl_file, settings)
+                return await _download_file(self.download_url), settings
         # Handle files telegram can't handle
         sendable_other.labels(site_code=self.site_id).inc()
         settings.caption.direct_link = True
         try:
-            async with _downloaded_file(self.preview_image_url) as dl_file:
-                return await self._upload_image(client, dl_file, settings)
+            return await _download_file(self.preview_image_url), settings
         except DownloadError as e:
             # Sometimes with stories, the preview image does not exist, so use thumbnail
             if e.exc.status == 404:
-                async with _downloaded_file(self.thumbnail_url) as dl_file:
-                    return await self._upload_image(client, dl_file, settings)
+                return await _download_file(self.thumbnail_url), settings
             raise e
+
+    async def upload_only(
+            self,
+            client: TelegramClient,
+            dl_file: DownloadedFile,
+            send_settings: SendSettings,
+    ) -> UploadedMedia:
+        ext = dl_file.file_ext()
+
+        # Handle potentially animated formats
+        if ext in self.EXTENSIONS_ANIMATED:
+            if await self._is_animated(dl_file.dl_path):
+                return await self._upload_video(client, dl_file, send_settings)
+            else:
+                return await self._upload_image(client, dl_file, send_settings)
+        # Handle photos
+        if ext in self.EXTENSIONS_PHOTO:
+            return await self._upload_image(client, dl_file, send_settings)
+        # Handle videos, which can be made pretty
+        if ext in self.EXTENSIONS_VIDEO:
+            sendable_animated.labels(site_code=self.site_id).inc()
+            return await self._upload_video(client, dl_file, send_settings)
+        # Everything else is a file, send with title and author (This might have been set by download already)
+        send_settings.caption.title = True
+        send_settings.caption.author = True
+        # Special handling, if it's small enough
+        dl_filesize = dl_file.filesize
+        if dl_filesize < self.SIZE_LIMIT_DOCUMENT:
+            # Handle pdfs, which can be sent as documents
+            if ext in self.EXTENSIONS_PDF:
+                send_settings.force_doc = True
+                return await self._upload_pdf(client, dl_file, send_settings)
+            # Handle audio
+            if ext in self.EXTENSIONS_AUDIO:
+                return await self._upload_audio(client, dl_file, send_settings)
+        # Raise an exception for other formats, as download should have given something that upload only can handle.
+        raise CantSendFileType(f"Not sure how to send file with extension: {ext}")
+
+    async def upload(self, client: TelegramClient) -> UploadedMedia:
+        dl_file, send_settings = await self.download()
+        uploaded_media: Optional[UploadedMedia] = None
+        try:
+            uploaded_media = await self.upload_only(client, dl_file, send_settings)
+        finally:
+            try_delete_sandbox_file(dl_file.dl_path)
+            if uploaded_media:
+                return uploaded_media
+            raise CantSendFileType("Failed to upload file type")
 
     def _save_to_debug(self, file_path: str) -> None:
         os.makedirs("debug", exist_ok=True)
@@ -774,6 +807,28 @@ class Sendable(InlineSendable):
             ],
             thumb=thumb_handle,
             force_file=False,
+        )
+        return UploadedMedia(self.submission_id, media, settings)
+
+    async def _upload_pdf(
+            self,
+            client: TelegramClient,
+            dl_file: DownloadedFile,
+            settings: SendSettings,
+    ) -> UploadedMedia:
+        sendable_auto_doc.labels(site_code=self.site_id).inc()
+        async with _downloaded_file(self.thumbnail_url) as thumb_file:
+            with time_taken_uploading_file.time():
+                file_handle = await client.upload_file(dl_file.dl_path)
+                thumb_handle = await client.upload_file(thumb_file.dl_path)
+        media = InputMediaUploadedDocument(
+            file=file_handle,
+            mime_type="application/pdf",
+            attributes=[
+                DocumentAttributeFilename(f"{self.submission_id.to_filename()}.pdf"),
+            ],
+            thumb=thumb_handle,
+            force_file=True,
         )
         return UploadedMedia(self.submission_id, media, settings)
 
