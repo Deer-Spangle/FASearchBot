@@ -9,7 +9,7 @@ from aiohttp import ClientPayloadError, ServerDisconnectedError, ClientOSError
 from prometheus_client import Counter
 
 from fa_search_bot.sites.furaffinity.sendable import SendableFASubmission
-from fa_search_bot.sites.sendable import UploadedMedia
+from fa_search_bot.sites.sendable import UploadedMedia, try_delete_sandbox_file
 from fa_search_bot.sites.submission_id import SubmissionID
 from fa_search_bot.subscriptions.runnable import Runnable, ShutdownError
 from fa_search_bot.subscriptions.utils import time_taken
@@ -79,7 +79,9 @@ class MediaUploader(Runnable):
         dl_file, send_settings = sub_state.dl_file
         while self.running:
             try:
-                return await sendable.upload_only(self.watcher.client, dl_file, send_settings)
+                uploaded_media = await sendable.upload_only(self.watcher.client, dl_file, send_settings)
+                try_delete_sandbox_file(dl_file.dl_path)
+                return uploaded_media
             except ConnectionError as e:
                 logger.warning(
                     "Upload failed, telegram has disconnected, trying again in %s",
