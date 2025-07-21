@@ -110,7 +110,7 @@ class WaitPool:
             await self.fetch_data_queue.put_refresh(sub_id)
 
     def states_ready_for_media_download(self) -> list[SubmissionCheckState]:
-        return [s for s in self.submission_state.values()[:] if s.is_ready_for_media_download()]
+        return [s for s in self.submission_state.values() if s.is_ready_for_media_download()]
 
     async def get_next_for_media_download(self) -> FASubmissionFull:
         async with self._lock:
@@ -131,7 +131,7 @@ class WaitPool:
             self.submission_state[sub_id].media_downloading = False
 
     def states_ready_for_media_upload(self) -> list[SubmissionCheckState]:
-        return [s for s in self.submission_state.values()[:] if s.is_ready_for_media_upload()]
+        return [s for s in self.submission_state.values() if s.is_ready_for_media_upload()]
 
     async def get_next_for_media_upload(self) -> SubmissionCheckState:
         async with self._lock:
@@ -191,4 +191,4 @@ class WaitPool:
         return self.fetch_data_queue.qsize_refresh()
 
     def qsize_upload(self) -> int:
-        return len([s for s in self.submission_state.values()[:] if s.is_ready_for_media_upload()])
+        return len([s for s in self.submission_state.values() if s.is_ready_for_media_upload()])
