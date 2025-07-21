@@ -12,7 +12,7 @@ from fa_search_bot.sites.furaffinity.sendable import SendableFASubmission
 from fa_search_bot.sites.sendable import UploadedMedia, DownloadError, SendSettings, CaptionSettings, DownloadedFile
 from fa_search_bot.sites.submission_id import SubmissionID
 from fa_search_bot.subscriptions.runnable import Runnable, ShutdownError
-from fa_search_bot.subscriptions.utils import time_taken
+from fa_search_bot.subscriptions.utils import time_taken, TimeKeeper
 from fa_search_bot.subscriptions.fetch_queue import TooManyRefresh
 
 if TYPE_CHECKING:
@@ -69,8 +69,10 @@ class MediaDownloader(Runnable):
         # Upload the file
         logger.debug("Downloading submission media: %s", sub_id)
         try:
-            with time_taken_downloading.time():
+            download_timer = TimeKeeper(time_taken_downloading)
+            with download_timer.time():
                 dl_file = await self.download_sendable(sendable)
+            logger.debug("Downloaded submission media: %s, duration: %s seconds", sub_id, download_timer.duration)
         except DownloadError as e:
             if e.exc.status != 404:
                 raise ValueError(

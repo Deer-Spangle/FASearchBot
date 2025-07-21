@@ -12,7 +12,7 @@ from fa_search_bot.sites.furaffinity.sendable import SendableFASubmission
 from fa_search_bot.sites.sendable import UploadedMedia, try_delete_sandbox_file
 from fa_search_bot.sites.submission_id import SubmissionID
 from fa_search_bot.subscriptions.runnable import Runnable, ShutdownError
-from fa_search_bot.subscriptions.utils import time_taken
+from fa_search_bot.subscriptions.utils import time_taken, TimeKeeper
 from fa_search_bot.subscriptions.wait_pool import SubmissionCheckState
 
 if TYPE_CHECKING:
@@ -67,8 +67,10 @@ class MediaUploader(Runnable):
         cache_misses.inc()
         # Upload the file
         logger.debug("Uploading submission media: %s", sub_id)
-        with time_taken_uploading.time():
+        upload_timer = TimeKeeper(time_taken_uploading)
+        with upload_timer.time():
             uploaded_media = await self.upload_media(sub_state)
+        logger.debug("Uploaded submission media: %s, duration: %s seconds", sub_id, upload_timer.duration)
         # Publish result
         logger.debug("Upload complete for %s, publishing to wait pool", sub_id)
         with time_taken_publishing.time():
