@@ -40,13 +40,30 @@ class SubmissionCheckState:
         self.uploaded_media = None
 
     def is_ready_for_media_download(self) -> bool:
-        return self.full_data is not None and not self.media_downloading and not self.is_ready_for_media_upload()
+        return all(
+            [
+                self.full_data is not None,
+                self.dl_file is None,
+                not self.media_downloading,
+            ]
+        )
 
     def is_ready_for_media_upload(self) -> bool:
-        return self.dl_file is not None and not self.media_uploading and not self.is_ready_to_send()
+        return all(
+            [
+                self.dl_file is not None,
+                not self.media_uploading,
+                not self.is_ready_to_send(),
+            ]
+        )
 
     def is_ready_to_send(self) -> bool:
-        return self.uploaded_media is not None or self.cache_entry is not None
+        return any(
+            [
+                self.uploaded_media is not None,
+                self.cache_entry is not None,
+            ]
+        )
 
 
 class WaitPool:
