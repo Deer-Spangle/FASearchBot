@@ -103,15 +103,16 @@ class DataFetcher(Runnable):
         with time_taken_checking_matches.time():
             matching_subscriptions = self.watcher.check_subscriptions(full_result)
         logger.debug("Submission %s matches %s subscriptions", sub_id, len(matching_subscriptions))
-        # Publish results
-        if matching_subscriptions:
-            sub_matches.inc()
-            sub_total_matches.inc(len(matching_subscriptions))
-            with time_taken_publishing.time():
-                await self.watcher.wait_pool.set_fetched_data(sub_id, full_result)
-        else:
+        # If submission doesn't match any subscriptions, drop it
+        if not matching_subscriptions:
             with time_taken_publishing.time():
                 await self.watcher.wait_pool.remove_state(sub_id)
+            return
+        # Publish results
+        sub_matches.inc()
+        sub_total_matches.inc(len(matching_subscriptions))
+        with time_taken_publishing.time():
+            await self.watcher.wait_pool.set_fetched_data(sub_id, full_result)
 
     async def fetch_data(self, sub_id: SubmissionID) -> Optional[FASubmissionFull]:
         # Keep trying to fetch data, unless it is gone
