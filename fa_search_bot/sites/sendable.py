@@ -344,6 +344,7 @@ class DownloadedFile:
 
 
 async def _download_file(url: str) -> DownloadedFile:
+    logger.debug("Downloading file %s", url)
     dl_path = temp_sandbox_path(file_ext(url))
     with time_taken_downloading_image.time():
         session = aiohttp.ClientSession()

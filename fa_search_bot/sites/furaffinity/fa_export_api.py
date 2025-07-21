@@ -89,9 +89,10 @@ class FAExportAPI:
         return self._session
 
     async def _api_request(self, path: str, endpoint_label: Endpoint) -> aiohttp.ClientResponse:
-        path = path.lstrip("/")
+        path = "/"+path.lstrip("/")
+        logger.debug("Making FAExport API request: %s", path)
         with api_request_times.labels(endpoint=endpoint_label.value).time():
-            async with self.session.get(f"/{path}") as resp:
+            async with self.session.get(path) as resp:
                 await resp.read()
         error_type = None
         if resp.status != 200:
