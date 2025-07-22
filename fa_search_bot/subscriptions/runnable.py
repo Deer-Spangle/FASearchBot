@@ -35,6 +35,11 @@ time_taken_processing = Summary(
     "Amount of time taken (in seconds) running the do_process() method on each task runner",
     labelnames=["runnable"],
 )
+latest_id_processed = Gauge(
+    "fasearchbot_subscriptiontask_latest_fa_id_processed",
+    "ID of the latest FA submission to be processed by each task runner",
+    labelnames=["runnable"],
+)
 
 
 class ShutdownError(RuntimeError):
@@ -60,6 +65,7 @@ class Runnable(ABC):
         self.runnable_latest_processed = latest_processed_time.labels(runnable=self.class_name)
         self.runnable_processed_count = total_processed_count.labels(runnable=self.class_name)
         self.time_taken_processing = time_taken_processing.labels(runnable=self.class_name)
+        self.latest_id_gauge = latest_id_processed.labels(runnable=self.class_name)
 
     async def run(self) -> None:
         # Start the subscription task

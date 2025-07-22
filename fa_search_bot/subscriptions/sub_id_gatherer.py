@@ -50,6 +50,7 @@ class SubIDGatherer(Runnable):
         self.latest_recorded_id: Optional[int] = None
         if self.watcher.latest_ids:
             self.latest_recorded_id = max(int(x) for x in self.watcher.latest_ids)
+        self.latest_id_gauge.set_function(lambda: self.latest_recorded_id)
 
     async def do_process(self) -> None:
         try:

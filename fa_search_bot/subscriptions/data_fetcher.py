@@ -111,6 +111,7 @@ class DataFetcher(Runnable):
         # Publish results
         sub_matches.inc()
         sub_total_matches.inc(len(matching_subscriptions))
+        self.latest_id_gauge.set(sub_id.submission_id)
         with time_taken_publishing.time():
             await self.watcher.wait_pool.set_fetched_data(sub_id, full_result)
 

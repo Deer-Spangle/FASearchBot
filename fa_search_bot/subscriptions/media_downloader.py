@@ -85,6 +85,7 @@ class MediaDownloader(Runnable):
         logger.debug("Download complete for %s, publishing to wait pool", sub_id)
         with time_taken_publishing.time():
             await self.watcher.wait_pool.set_downloaded(sub_id, dl_file)
+        self.latest_id_gauge.set(sub_id.submission_id)
 
     async def handle_deleted(self, sendable: SendableFASubmission) -> None:
         sub_id = sendable.submission_id

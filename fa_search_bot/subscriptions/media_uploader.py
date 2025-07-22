@@ -75,6 +75,7 @@ class MediaUploader(Runnable):
         logger.debug("Upload complete for %s, publishing to wait pool", sub_id)
         with time_taken_publishing.time():
             await self.watcher.wait_pool.set_uploaded(sub_id, uploaded_media)
+        self.latest_id_gauge.set(sub_id.submission_id)
 
     async def upload_media(self, sub_state: SubmissionCheckState) -> UploadedMedia:
         sendable = SendableFASubmission(sub_state.full_data)
