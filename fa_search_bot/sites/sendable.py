@@ -28,6 +28,7 @@ from telethon.tl.types import (
 )
 
 from fa_search_bot.sites.sent_submission import SentSubmission, sent_from_cache
+from fa_search_bot.subscriptions.utils import TimeKeeper
 
 if TYPE_CHECKING:
     from typing import Any, Awaitable, Optional
@@ -346,7 +347,8 @@ class DownloadedFile:
 async def _download_file(url: str) -> DownloadedFile:
     logger.debug("Downloading file %s", url)
     dl_path = temp_sandbox_path(file_ext(url))
-    with time_taken_downloading_image.time():
+    dl_timer = TimeKeeper(time_taken_downloading_image)
+    with dl_timer.time():
         session = aiohttp.ClientSession()
         dl_filesize = 0
         async with session.get(url) as resp:
@@ -358,6 +360,7 @@ async def _download_file(url: str) -> DownloadedFile:
                 async for chunk in resp.content.iter_chunked(8192):
                     f.write(chunk)
                     dl_filesize += len(chunk)
+    logger.debug("Downloaded file %s, %s bytes in %s seconds", url, dl_filesize, dl_timer.duration)
     return DownloadedFile(dl_path, dl_filesize)
 
 
@@ -719,7 +722,11 @@ class Sendable(InlineSendable):
                         if video_metadata.has_audio or video_metadata.duration > self.LENGTH_LIMIT_GIF:
                             await self._thumbnail_video(output_path, thumb_path)
                             thumbnail = True
-                    with time_taken_uploading_file.time():
+                    upload_timer = TimeKeeper(
+                        time_taken_uploading_file,
+                        f"Uploading video {self.submission_id}: %s seconds"
+                    )
+                    with upload_timer.time():
                         file_handle = await client.upload_file(output_path)
                         if thumbnail:
                             thumb_handle = await client.upload_file(thumb_path)
@@ -776,7 +783,8 @@ class Sendable(InlineSendable):
                     raise e2
 
             filesize = os.path.getsize(output_file)
-            with time_taken_uploading_file.time():
+            upload_timer = TimeKeeper(time_taken_uploading_file, f"Uploading image {self.submission_id}: %s seconds")
+            with upload_timer.time():
                 file_handle = await client.upload_file(
                     output_file,
                     file_size=filesize
@@ -792,7 +800,8 @@ class Sendable(InlineSendable):
     ) -> UploadedMedia:
         sendable_audio.labels(site_code=self.site_id).inc()
         async with _downloaded_file(self.thumbnail_url) as thumb_file:
-            with time_taken_uploading_file.time():
+            upload_timer = TimeKeeper(time_taken_uploading_file, "Uploading audio {self.submission_id}: %s seconds")
+            with upload_timer.time():
                 file_handle = await client.upload_file(dl_file.dl_path)
                 thumb_handle = await client.upload_file(thumb_file.dl_path)
         media = InputMediaUploadedDocument(
@@ -819,7 +828,8 @@ class Sendable(InlineSendable):
     ) -> UploadedMedia:
         sendable_auto_doc.labels(site_code=self.site_id).inc()
         async with _downloaded_file(self.thumbnail_url) as thumb_file:
-            with time_taken_uploading_file.time():
+            upload_timer = TimeKeeper(time_taken_uploading_file, "Uploading pdf {self.submission_id}: %s seconds")
+            with upload_timer.time():
                 file_handle = await client.upload_file(dl_file.dl_path)
                 thumb_handle = await client.upload_file(thumb_file.dl_path)
         media = InputMediaUploadedDocument(
