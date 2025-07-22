@@ -93,11 +93,9 @@ class WaitPool:
     async def get_next_for_data_fetch(self) -> SubmissionID:
         return self.fetch_data_queue.get_nowait()
 
-    def count_fetched_not_uploaded(self) -> int:
-        return len(self.states_ready_for_media_download()) + len(self.states_ready_for_media_upload())
-
     async def set_fetched_data(self, sub_id: SubmissionID, full_data: FASubmissionFull) -> None:
-        while self.count_fetched_not_uploaded() > self.max_ready_for_upload:
+        # Provide backpressure on data fetcher, to avoid it running ahead of downstream processing
+        while self.size_active() > self.max_ready_for_upload:
             logger.debug("Waiting for media uploads to get below submission count limit")
             await self._media_uploading_event.wait()
         async with self._lock:
