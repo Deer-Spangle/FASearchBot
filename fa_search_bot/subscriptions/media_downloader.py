@@ -5,7 +5,7 @@ from asyncio import QueueEmpty
 from typing import Optional, TYPE_CHECKING
 
 from aiohttp import ClientPayloadError, ServerDisconnectedError, ClientOSError
-from prometheus_client import Counter
+from prometheus_client import Counter, Histogram
 
 from fa_search_bot.sites.furaffinity.sendable import SendableFASubmission
 from fa_search_bot.sites.sendable import UploadedMedia, DownloadError, SendSettings, CaptionSettings, DownloadedFile
@@ -36,6 +36,29 @@ cache_results = Counter(
 )
 cache_hits = cache_results.labels(result="hit")
 cache_misses = cache_results.labels(result="miss")
+download_before_deleted = Counter(
+    "fasearchbot_mediadownloader_downloaded_before_deleted",
+    "Count of how many submissions processed by the downloader were downloaded, or how many were deleted before they could be downloaded",
+    labelnames=["result"]
+)
+downloaded_count = download_before_deleted.labels(result="downloaded")
+deleted_count = download_before_deleted.labels(result="deleted")
+download_errors = Counter(
+    "fasearchbot_mediadownloader_download_errors",
+    "Count of how many downloads hit an error",
+    labelnames=["result"]
+)
+download_success_count = download_errors.labels(result="success")
+download_error_unrecoverable = download_errors.labels(result="unrecoverable_error")
+download_error_deleted = download_errors.labels(result="deleted")
+download_attempts_needed = Histogram(
+    "fasearchbot_mediadownloader_download_attempts_needed",
+    "How many attempts were needed to successfully download a piece of media",
+    buckets=[0, 1, 2, 3, 4, 5, 10],
+    labelnames=["result"],
+)
+download_attempts_needed_success = download_attempts_needed.labels(result="success")
+download_attempts_needed_failed = download_attempts_needed.labels(result="failed")
 
 
 class MediaDownloader(Runnable):
@@ -74,13 +97,18 @@ class MediaDownloader(Runnable):
             logger.debug("Downloaded submission media: %s, duration: %s seconds", sub_id, download_timer.duration)
         except DownloadError as e:
             if e.exc.status != 404:
+                download_error_unrecoverable.inc()
                 raise ValueError(
                     "Download error while downloading media for submission: %s",
                     sendable.submission_id,
                 ) from e
             with time_taken_publishing.time():
                 await self.handle_deleted(sendable)
+            download_error_deleted.inc()
+            deleted_count.inc()
             return
+        downloaded_count.inc()
+        download_success_count.inc()
         logger.debug("Download complete for %s, publishing to wait pool", sub_id)
         with time_taken_publishing.time():
             await self.watcher.wait_pool.set_downloaded(sub_id, dl_file)
@@ -101,9 +129,13 @@ class MediaDownloader(Runnable):
             await self.watcher.wait_pool.set_uploaded(sub_id, uploaded_media)
 
     async def download_sendable(self, sendable: SendableFASubmission) -> Optional[tuple[DownloadedFile, SendSettings]]:
+        attempts = 0
         while self.running:
+            attempts += 1
             try:
-                return await sendable.download()
+                dl_data = await sendable.download()
+                download_attempts_needed_success.observe(attempts)
+                return dl_data
             except DownloadError as e:
                 if e.exc.status in [502, 520, 522, 403, 524]:
                     logger.warning(
@@ -113,6 +145,7 @@ class MediaDownloader(Runnable):
                     )
                     await self._wait_while_running(self.CONNECTION_BACKOFF)
                     continue
+                download_attempts_needed_failed.observe(attempts)
                 raise e
             except ClientPayloadError as e:
                 logger.warning(
@@ -141,6 +174,7 @@ class MediaDownloader(Runnable):
                 await self._wait_while_running(self.CONNECTION_BACKOFF)
                 continue
             except Exception as e:
+                download_attempts_needed_failed.observe(attempts)
                 raise ValueError("Failed to download media for submission: %s", sendable.submission_id) from e
         raise ShutdownError("Media downloader has shutdown while trying to download media")
 
