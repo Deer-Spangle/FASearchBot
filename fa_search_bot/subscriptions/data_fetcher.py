@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from asyncio import QueueEmpty
 from typing import Optional, TYPE_CHECKING
@@ -89,7 +88,7 @@ class DataFetcher(Runnable):
             sub_id = await self.watcher.wait_pool.get_next_for_data_fetch()
         except QueueEmpty:
             with time_taken_queue_waiting.time():
-                await asyncio.sleep(self.QUEUE_BACKOFF)
+                await self._wait_while_running(self.QUEUE_BACKOFF)
             return
         self.last_sub_id = sub_id
         # Fetch data

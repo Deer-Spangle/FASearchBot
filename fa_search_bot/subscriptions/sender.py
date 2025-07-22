@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import collections
 import datetime
 import logging
@@ -72,7 +71,7 @@ class Sender(Runnable):
             next_state = await self.watcher.wait_pool.pop_next_ready_to_send()
         if not next_state:
             with time_taken_waiting.time():
-                await asyncio.sleep(self.QUEUE_BACKOFF)
+                await self._wait_while_running(self.QUEUE_BACKOFF)
             return
         self.last_state = next_state
         logger.debug("Got submission ready to send: %s", next_state.sub_id)

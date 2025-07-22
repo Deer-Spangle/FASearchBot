@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from asyncio import QueueEmpty
 from typing import Optional, TYPE_CHECKING
@@ -51,7 +50,7 @@ class MediaUploader(Runnable):
             sub_state = await self.watcher.wait_pool.get_next_for_media_upload()
         except QueueEmpty:
             with time_taken_waiting.time():
-                await asyncio.sleep(self.QUEUE_BACKOFF)
+                await self._wait_while_running(self.QUEUE_BACKOFF)
             return
         sub_id = sub_state.sub_id
         self.last_processed = sub_id

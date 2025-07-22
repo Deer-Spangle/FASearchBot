@@ -57,6 +57,7 @@ class Runnable(ABC):
     def __init__(self, watcher: "SubscriptionWatcher"):
         self.watcher = watcher
         self.running = False
+        self._stop_event = asyncio.Event()
         self.heartbeat_expiry = datetime.datetime.now()
         self.class_name = self.__class__.__name__
         self.time_taken_updating_heartbeat = time_taken.labels(
@@ -97,6 +98,8 @@ class Runnable(ABC):
 
     def stop(self) -> None:
         self.running = False
+        self._stop_event.set()
+        self._stop_event.clear()
 
     def update_processed_metrics(self) -> None:
         self.runnable_latest_processed.set_to_current_time()
@@ -110,8 +113,13 @@ class Runnable(ABC):
             self.heartbeat_expiry = datetime.datetime.now() + datetime.timedelta(seconds=self.SECONDS_PER_HEARTBEAT)
 
     async def _wait_while_running(self, seconds: float) -> None:
-        sleep_end = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
-        while datetime.datetime.now() < sleep_end:
-            if not self.running:
-                break
-            await asyncio.sleep(0.1)
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(self._stop_event.wait()),
+                asyncio.create_task(asyncio.sleep(seconds)),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        return

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from asyncio import QueueEmpty
 from typing import Optional, TYPE_CHECKING
@@ -51,7 +50,7 @@ class MediaDownloader(Runnable):
             full_data = await self.watcher.wait_pool.get_next_for_media_download()
         except QueueEmpty:
             with time_taken_waiting.time():
-                await asyncio.sleep(self.QUEUE_BACKOFF)
+                await self._wait_while_running(self.QUEUE_BACKOFF)
             return
         sendable = SendableFASubmission(full_data)
         sub_id = sendable.submission_id
