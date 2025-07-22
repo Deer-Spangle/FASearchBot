@@ -82,7 +82,7 @@ class Runnable(ABC):
             # Update metrics
             self.update_processed_metrics()
             # Update heartbeat
-            self.update_heartbeat()
+            await self.update_heartbeat()
 
     @abstractmethod
     async def do_process(self) -> None:
@@ -105,10 +105,10 @@ class Runnable(ABC):
         self.runnable_latest_processed.set_to_current_time()
         self.runnable_processed_count.inc()
 
-    def update_heartbeat(self):
+    async def update_heartbeat(self):
         if datetime.datetime.now() > self.heartbeat_expiry:
             with self.time_taken_updating_heartbeat.time():
-                heartbeat.update_heartbeat(f"FASearchBot_task_{self.class_name}")
+                await asyncio.to_thread(lambda: heartbeat.update_heartbeat(f"FASearchBot_task_{self.class_name}"))
             logger.debug("Heartbeat from %s", self.class_name)
             self.heartbeat_expiry = datetime.datetime.now() + datetime.timedelta(seconds=self.SECONDS_PER_HEARTBEAT)
 
