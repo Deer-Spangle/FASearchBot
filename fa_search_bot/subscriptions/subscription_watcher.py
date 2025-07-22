@@ -54,6 +54,10 @@ gauge_wait_pool_size = Gauge(
     "fasearchbot_fasubwatcher_wait_pool_size",
     "Total number of submissions in the wait pool",
 )
+gauge_wait_pool_active_size = Gauge(
+    "fasearchbot_fasubwatcher_wait_pool_active_size",
+    "Total number of submissions in the active wait pool",
+)
 gauge_fetch_queue_size = Gauge(
     "fasearchbot_fasubwatcher_fetch_data_queue_size",
     "Total number of submission IDs in the fetch data queue",
@@ -155,6 +159,7 @@ class SubscriptionWatcher:
         )
         gauge_sub_blocks.set_function(lambda: sum(len(blocks) for blocks in self.blocklists.values()))
         gauge_wait_pool_size.set_function(lambda: self.wait_pool.size())
+        gauge_wait_pool_active_size.set_function(lambda: self.wait_pool.size_active())
         gauge_fetch_queue_new_size.set_function(lambda: self.wait_pool.qsize_fetch_new())
         gauge_fetch_queue_refresh_size.set_function(lambda: self.wait_pool.qsize_fetch_refresh())
         gauge_download_queue_size.set_function(lambda: self.wait_pool.qsize_download())

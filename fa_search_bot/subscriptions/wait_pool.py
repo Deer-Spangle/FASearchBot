@@ -76,6 +76,7 @@ class WaitPool:
     def __init__(self, max_ready_for_upload: int = DEFAULT_MAX_READY_FOR_UPLOAD) -> None:
         self.max_ready_for_upload = max_ready_for_upload
         self.submission_state: Dict[SubmissionID, SubmissionCheckState] = {}
+        self.active_states: Dict[SubmissionID, SubmissionCheckState] = {}
         self.fetch_data_queue: FetchQueue = FetchQueue()
         self._lock = Lock()
         self._media_uploading_event = Event()
@@ -103,6 +104,8 @@ class WaitPool:
             if sub_id not in self.submission_state:
                 return
             self.submission_state[sub_id].full_data = full_data
+            # When data is fetched, copy to active states
+            self.active_states[sub_id] = self.submission_state[sub_id]
 
     async def revert_data_fetch(self, sub_id: SubmissionID) -> None:
         # This reverts a submission back to before any data was fetched about it, and re-queues it for data fetch
@@ -110,10 +113,14 @@ class WaitPool:
             if sub_id not in self.submission_state:
                 self.submission_state[sub_id] = SubmissionCheckState(sub_id)
             self.submission_state[sub_id].reset()
+            # Remove from active states
+            if sub_id in self.active_states:
+                del self.active_states[sub_id]
+            # Re-queue for data fetch refresh
             await self.fetch_data_queue.put_refresh(sub_id)
 
     def states_ready_for_media_download(self) -> list[SubmissionCheckState]:
-        return [s for s in self.submission_state.values() if s.is_ready_for_media_download()]
+        return [s for s in self.active_states.values() if s.is_ready_for_media_download()]
 
     async def get_next_for_media_download(self) -> FASubmissionFull:
         async with self._lock:
@@ -134,7 +141,7 @@ class WaitPool:
             self.submission_state[sub_id].media_downloading = False
 
     def states_ready_for_media_upload(self) -> list[SubmissionCheckState]:
-        return [s for s in self.submission_state.values() if s.is_ready_for_media_upload()]
+        return [s for s in self.active_states.values() if s.is_ready_for_media_upload()]
 
     async def get_next_for_media_upload(self) -> SubmissionCheckState:
         async with self._lock:
@@ -170,7 +177,7 @@ class WaitPool:
             del self.submission_state[sub_id]
 
     def states_ready_to_send(self) -> list[SubmissionCheckState]:
-        return [s for s in self.submission_state.values() if s.is_ready_to_send()]
+        return [s for s in self.active_states.values() if s.is_ready_to_send()]
 
     async def pop_next_ready_to_send(self) -> Optional[SubmissionCheckState]:
         async with self._lock:
@@ -181,14 +188,20 @@ class WaitPool:
             if not next_state.is_ready_to_send():
                 return None
             del self.submission_state[next_state.sub_id]
+            del self.active_states[next_state.sub_id]
             return next_state
 
     async def return_populated_state(self, state: SubmissionCheckState) -> None:
         async with self._lock:
             self.submission_state[state.sub_id] = state
+            if state.full_data is not None:
+                self.active_states[state.sub_id] = state
 
     def size(self) -> int:
         return len(self.submission_state)
+
+    def size_active(self) -> int:
+        return len(self.active_states)
 
     def qsize_fetch_new(self) -> int:
         return self.fetch_data_queue.qsize_new()
