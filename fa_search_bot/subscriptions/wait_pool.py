@@ -79,6 +79,9 @@ class WaitPool:
         self.fetch_data_queue: FetchQueue = FetchQueue()
         self._lock = Lock()
         self._media_uploading_event = Event()
+        self._cache_qsize_download: Optional[int] = None
+        self._cache_qsize_upload: Optional[int] = None
+        self._cache_qsize_send: Optional[int] = None
 
     async def add_sub_id(self, sub_id: SubmissionID) -> None:
         async with self._lock:
@@ -166,6 +169,9 @@ class WaitPool:
                 raise ValueError("This state cannot be removed because it is not in the wait pool")
             del self.submission_state[sub_id]
 
+    def states_ready_to_send(self) -> list[SubmissionCheckState]:
+        return [s for s in self.submission_state.values() if s.is_ready_to_send()]
+
     async def pop_next_ready_to_send(self) -> Optional[SubmissionCheckState]:
         async with self._lock:
             submission_states = self.submission_state.values()
@@ -190,5 +196,23 @@ class WaitPool:
     def qsize_fetch_refresh(self) -> int:
         return self.fetch_data_queue.qsize_refresh()
 
+    def qsize_download(self) -> int:
+        try:
+            self._cache_qsize_download = len(self.states_ready_for_media_download())
+        except Exception:
+            pass
+        return self._cache_qsize_download
+
     def qsize_upload(self) -> int:
-        return len([s for s in self.submission_state.values() if s.is_ready_for_media_upload()])
+        try:
+            self._cache_qsize_upload = len(self.states_ready_for_media_upload())
+        except Exception:
+            pass
+        return self._cache_qsize_upload
+
+    def qsize_send(self) -> int:
+        try:
+            self._cache_qsize_send = len(self.states_ready_to_send())
+        except Exception:
+            pass
+        return self._cache_qsize_send

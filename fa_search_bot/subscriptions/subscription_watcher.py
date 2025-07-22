@@ -61,9 +61,17 @@ gauge_fetch_queue_size = Gauge(
 )
 gauge_fetch_queue_new_size = gauge_fetch_queue_size.labels(sub_queue="new")
 gauge_fetch_queue_refresh_size = gauge_fetch_queue_size.labels(sub_queue="refresh")
+gauge_download_queue_size = Gauge(
+    "fasearchbot_fasubwatcher_download_queue_size",
+    "Total number of submissions which are ready for media download",
+)
 gauge_upload_queue_size = Gauge(
     "fasearchbot_fasubwatcher_upload_queue_size",
-    "Total number of submissions in the upload queue",
+    "Total number of submissions which are ready for media upload",
+)
+gauge_send_queue_size = Gauge(
+    "fasearchbot_fasubwatcher_send_queue_size",
+    "Total number of submissions which are ready to be sent",
 )
 gauge_running_data_fetcher_count = Gauge(
     "fasearchbot_fasubwatcher_running_data_fetcher_count",
@@ -149,7 +157,9 @@ class SubscriptionWatcher:
         gauge_wait_pool_size.set_function(lambda: self.wait_pool.size())
         gauge_fetch_queue_new_size.set_function(lambda: self.wait_pool.qsize_fetch_new())
         gauge_fetch_queue_refresh_size.set_function(lambda: self.wait_pool.qsize_fetch_refresh())
+        gauge_download_queue_size.set_function(lambda: self.wait_pool.qsize_download())
         gauge_upload_queue_size.set_function(lambda: self.wait_pool.qsize_upload())
+        gauge_send_queue_size.set_function(lambda: self.wait_pool.qsize_send())
         gauge_running_data_fetcher_count.set_function(lambda: len([f for f in self.data_fetchers if f.running]))
         gauge_expected_data_fetcher_count.set(self.config.num_data_fetchers)
         gauge_running_media_downloader_count.set_function(lambda: len([f for f in self.media_downloaders if f.running]))
