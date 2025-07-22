@@ -5,7 +5,7 @@ from asyncio import QueueEmpty
 from typing import Optional, TYPE_CHECKING
 
 from aiohttp import ClientPayloadError, ServerDisconnectedError, ClientOSError
-from prometheus_client import Counter
+from prometheus_client import Counter, Histogram
 
 from fa_search_bot.sites.furaffinity.sendable import SendableFASubmission
 from fa_search_bot.sites.sendable import UploadedMedia, try_delete_sandbox_file
@@ -36,6 +36,14 @@ cache_results = Counter(
 )
 cache_hits = cache_results.labels(result="hit")
 cache_misses = cache_results.labels(result="miss")
+upload_attempts_needed = Histogram(
+    "fasearchbot_mediauploader_upload_attempts_needed",
+    "How many attempts were needed to successfully upload a piece of media to Telegram",
+    buckets=[0, 1, 2, 3, 4, 5, 10],
+    labelnames=["result"],
+)
+upload_attempts_needed_success = upload_attempts_needed.labels(result="success")
+upload_attempts_needed_failed = upload_attempts_needed.labels(result="failed")
 
 
 class MediaUploader(Runnable):
@@ -79,10 +87,13 @@ class MediaUploader(Runnable):
     async def upload_media(self, sub_state: SubmissionCheckState) -> UploadedMedia:
         sendable = SendableFASubmission(sub_state.full_data)
         dl_file, send_settings = sub_state.dl_file
+        attempts = 0
         while self.running:
+            attempts += 1
             try:
                 uploaded_media = await sendable.upload_only(self.watcher.client, dl_file, send_settings)
                 try_delete_sandbox_file(dl_file.dl_path)
+                upload_attempts_needed_success.observe(attempts)
                 return uploaded_media
             except ConnectionError as e:
                 logger.warning(
@@ -119,6 +130,7 @@ class MediaUploader(Runnable):
                 await self._wait_while_running(self.CONNECTION_BACKOFF)
                 continue
             except Exception as e:
+                upload_attempts_needed_failed.observe(attempts)
                 raise ValueError("Failed to upload media to telegram for submission: %s", sendable.submission_id) from e
         raise ShutdownError("Media uploader has shutdown while trying to upload media")
 
