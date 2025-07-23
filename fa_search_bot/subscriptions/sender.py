@@ -5,7 +5,7 @@ import datetime
 import logging
 from typing import Union, Dict, List, Optional, TYPE_CHECKING
 
-from prometheus_client import Counter, Summary
+from prometheus_client import Counter, Summary, Histogram
 from telethon.errors import UserIsBlockedError, InputUserDeactivatedError, ChannelPrivateError, PeerIdInvalidError, FloodWaitError
 from telethon.errors.rpcerrorlist import FilePartMissingError, FilePart0MissingError
 from telethon.tl.types import TypeInputPeer
@@ -13,7 +13,7 @@ from telethon.tl.types import TypeInputPeer
 from fa_search_bot.sites.furaffinity.sendable import SendableFASubmission
 from fa_search_bot.subscriptions.runnable import Runnable
 from fa_search_bot.subscriptions.subscription import Subscription
-from fa_search_bot.subscriptions.utils import time_taken
+from fa_search_bot.subscriptions.utils import time_taken, TimeKeeper
 from fa_search_bot.subscriptions.wait_pool import SubmissionCheckState
 
 if TYPE_CHECKING:
@@ -56,6 +56,20 @@ updates_sent_cache = total_updates_sent.labels(media_type="cached")
 updates_sent_fresh_cache = total_updates_sent.labels(media_type="fresh_cache")
 updates_sent_upload = total_updates_sent.labels(media_type="upload")
 updates_sent_re_upload = total_updates_sent.labels(media_type="re_upload")
+send_attempts_needed = Histogram(
+    "fasearchbot_subscriptionsender_sender_attempts_needed",
+    "How many attempts were needed to successfully send a message to a chat on Telegram",
+    buckets=[0, 1, 2, 3, 4, 5, 10],
+    labelnames=["result"],
+)
+send_attempts_needed_success = send_attempts_needed.labels(result="success")
+send_attempts_needed_failed = send_attempts_needed.labels(result="failed")
+send_attempts_needed_file_part_mising = send_attempts_needed.labels(result="file_part_missing")
+send_attempts_needed_blocked = send_attempts_needed.labels(result="blocked")
+single_message_send_timer = Summary(
+    "fasearchbot_subscriptionsender_single_message_send_time_taken",
+    "Amount of time taken (in seconds) to send a submission to a single chat which is subscribed to it",
+)
 
 
 class Sender(Runnable):
@@ -76,9 +90,10 @@ class Sender(Runnable):
         self.last_state = next_state
         logger.debug("Got submission ready to send: %s", next_state.sub_id)
         # Send out messages
-        with time_taken_sending_messages.time():
+        send_timer = TimeKeeper(time_taken_sending_messages)
+        with send_timer.time():
             await self._send_updates(next_state)
-        logger.debug("Sent messages for submission %s", next_state.sub_id)
+        logger.debug("Sent messages for submission %s, duration: %s", next_state.sub_id, send_timer.duration)
         # Log the posting date of the latest sent submission
         self.watcher.update_latest_observed(next_state.full_data.posted_at)
         # Update latest ids with the submission we just checked, and save config
@@ -102,7 +117,13 @@ class Sender(Runnable):
                 continue
             queries = ", ".join([f'"{sub.query_str}"' for sub in subs])
             prefix = f"Update on {queries} subscription{'' if len(subs) == 1 else 's'}:"
-            await self._try_send_subscription_update(sendable, state, dest, prefix)
+            send_timer = TimeKeeper(single_message_send_timer)
+            with send_timer.time():
+                await self._try_send_subscription_update(sendable, state, dest, prefix)
+            logger.debug(
+                "Sent submission %s to destination for %s subscriptions, duration: %s",
+                state.sub_id, len(subs), send_timer.duration
+            )
 
     async def _try_send_subscription_update(
         self,
@@ -119,6 +140,7 @@ class Sender(Runnable):
             try:
                 await self._send_subscription_update(sendable, state, chat, prefix)
                 state.sent_to.append(chat)
+                send_attempts_needed_success.observe(send_attempt)
                 return
             except (UserIsBlockedError, InputUserDeactivatedError, ChannelPrivateError, PeerIdInvalidError):
                 sub_blocked.inc()
@@ -126,6 +148,7 @@ class Sender(Runnable):
                 all_subs = [sub for sub in self.watcher.subscriptions if sub.destination == chat]
                 for sub in all_subs:
                     sub.paused = True
+                send_attempts_needed_blocked.observe(send_attempt)
                 return
             except FloodWaitError as e:
                 seconds = e.seconds
@@ -141,6 +164,7 @@ class Sender(Runnable):
                     sendable.submission_id,
                 )
                 await self.watcher.wait_pool.revert_data_fetch(sendable.submission_id)
+                send_attempts_needed_file_part_mising.observe(send_attempt)
                 return
             except Exception as e:
                 sub_update_send_failures.inc()
@@ -150,6 +174,7 @@ class Sender(Runnable):
                     chat,
                     exc_info=e,
                 )
+                send_attempts_needed_failed.observe(send_attempt)
                 raise e
 
     async def _send_subscription_update(
