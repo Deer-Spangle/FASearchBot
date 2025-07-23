@@ -26,6 +26,9 @@ time_taken_reading_queue = time_taken.labels(
     task="reading wait-pool for new data", runnable="Sender", task_type="active"
 )
 time_taken_waiting = time_taken.labels(task="waiting for new events in queue", runnable="Sender", task_type="waiting")
+time_taken_checking_matches = time_taken.labels(
+    task="checking whether submission matches subscriptions", runnable="Sender", task_type="active",
+)
 time_taken_sending_messages = time_taken.labels(
     task="sending messages to subscriptions", runnable="Sender", task_type="active"
 )
@@ -94,10 +97,7 @@ class Sender(Runnable):
         self.last_state = next_state
         logger.debug("Got submission ready to send: %s", next_state.sub_id)
         # Send out messages
-        send_timer = TimeKeeper(time_taken_sending_messages)
-        with send_timer.time():
-            await self._send_updates(next_state)
-        logger.debug("Sent messages for submission %s, duration: %s", next_state.sub_id, send_timer.duration)
+        await self._send_updates(next_state)
         # Log the posting date of the latest sent submission
         self.watcher.update_latest_observed(next_state.full_data.posted_at)
         # Update latest ids with the submission we just checked, and save config
@@ -107,27 +107,32 @@ class Sender(Runnable):
 
     async def _send_updates(self, state: SubmissionCheckState) -> None:
         sendable = SendableFASubmission(state.full_data)
-        # Get subscriptions list again, because it might have changed since DataFetcher checked
-        subscriptions = self.watcher.check_subscriptions(state.full_data)
-        # Map which subscriptions require this submission at each destination
-        destination_map: Dict[int, List[Subscription]] = collections.defaultdict(lambda: [])
-        for sub in subscriptions:
-            sub.latest_update = datetime.datetime.now()
-            destination_map[sub.destination].append(sub)
+        # Check subscriptions
+        with time_taken_checking_matches.time():
+            # Get subscriptions list again, because it might have changed since DataFetcher checked
+            subscriptions = self.watcher.check_subscriptions(state.full_data)
+            # Map which subscriptions require this submission at each destination
+            destination_map: Dict[int, List[Subscription]] = collections.defaultdict(lambda: [])
+            for sub in subscriptions:
+                sub.latest_update = datetime.datetime.now()
+                destination_map[sub.destination].append(sub)
         # Send the submission to each location
-        for dest, subs in destination_map.items():
-            if dest in state.sent_to:
-                # Already sent to that destination, skip
-                continue
-            queries = ", ".join([f'"{sub.query_str}"' for sub in subs])
-            prefix = f"Update on {queries} subscription{'' if len(subs) == 1 else 's'}:"
-            send_timer = TimeKeeper(single_message_send_timer)
-            with send_timer.time():
-                await self._try_send_subscription_update(sendable, state, dest, prefix)
-            logger.debug(
-                "Sent submission %s to destination for %s subscriptions, duration: %s",
-                state.sub_id, len(subs), send_timer.duration
-            )
+        send_all_timer = TimeKeeper(time_taken_sending_messages)
+        with send_all_timer.time():
+            for dest, subs in destination_map.items():
+                if dest in state.sent_to:
+                    # Already sent to that destination, skip
+                    continue
+                queries = ", ".join([f'"{sub.query_str}"' for sub in subs])
+                prefix = f"Update on {queries} subscription{'' if len(subs) == 1 else 's'}:"
+                send_one_timer = TimeKeeper(single_message_send_timer)
+                with send_one_timer.time():
+                    await self._try_send_subscription_update(sendable, state, dest, prefix)
+                logger.debug(
+                    "Sent submission %s to destination for %s subscriptions, duration: %s",
+                    state.sub_id, len(subs), send_one_timer.duration
+                )
+        logger.debug("Sent messages for submission %s, duration: %s", state.sub_id, send_all_timer.duration)
 
     async def _try_send_subscription_update(
         self,
