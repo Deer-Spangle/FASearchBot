@@ -47,10 +47,12 @@ class Subscription:
         self.query = parse_query(query_str)
         self.paused = False
 
-    def matches_result(self, result: FASubmissionFull, blocklist_query: Query) -> bool:
+    def matches_result(self, result: FASubmissionFull, blocklist_query: Optional[Query]) -> bool:
         if self.paused:
             return False
-        full_query = AndQuery([self.query, blocklist_query])
+        full_query = self.query
+        if blocklist_query:
+            full_query = AndQuery([self.query, blocklist_query])
         return full_query.matches_submission(result)
 
     def to_json(self) -> Dict:

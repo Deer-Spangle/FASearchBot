@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from asyncio import Task
+from concurrent.futures import ProcessPoolExecutor
 from typing import TYPE_CHECKING
 
 from prometheus_client import Gauge
@@ -15,7 +16,7 @@ from fa_search_bot.config import SubscriptionWatcherConfig
 from fa_search_bot.subscriptions.media_downloader import MediaDownloader
 from fa_search_bot.subscriptions.media_uploader import MediaUploader
 from fa_search_bot.subscriptions.runnable import ShutdownError
-from fa_search_bot.subscriptions.query_parser import AndQuery
+from fa_search_bot.subscriptions.query_parser import Query
 from fa_search_bot.sites.submission_id import SubmissionID
 from fa_search_bot.subscriptions.data_fetcher import DataFetcher
 from fa_search_bot.subscriptions.sender import Sender
@@ -148,6 +149,9 @@ class SubscriptionWatcher:
         self.sender: Optional[Sender] = None
         self.sub_tasks: List[Task] = []
 
+        # Initialise the subscription checker process pool
+        self.checker_executor = ProcessPoolExecutor(2)
+
         # Initialise gauges and prometheus metrics
         self.latest_observed_submission: Optional[datetime.datetime] = None
         gauge_sub.set_function(lambda: len(self.subscriptions))
@@ -257,23 +261,34 @@ class SubscriptionWatcher:
         else:
             self.blocklists[destination] = DestinationBlocklist.from_query(destination, tag)
 
-    def _check_subscriptions(self, full_result: FASubmissionFull) -> list[Subscription]:
+    @staticmethod
+    def _check_subscriptions_static(
+            subscriptions: set[Subscription],
+            blocklists: dict[int, DestinationBlocklist],
+            full_result: FASubmissionFull,
+    ) -> list[Subscription]:
         # Copy subscriptions, to avoid "changed size during iteration" issues
-        subscriptions = self.subscriptions.copy()
+        subscriptions = subscriptions.copy()
         # Check which subscriptions match
         matching_subscriptions = []
         for subscription in subscriptions:
-            blocklist = self.blocklists.get(subscription.destination)
-            if blocklist is None:
-                blocklist_query = AndQuery([]) # TODO: seems silly?
-            else:
+            blocklist = blocklists.get(subscription.destination)
+            blocklist_query: Optional[Query] = None
+            if blocklist is not None:
                 blocklist_query = blocklist.as_combined_query()
             if subscription.matches_result(full_result, blocklist_query):
                 matching_subscriptions.append(subscription)
         return matching_subscriptions
 
     async def check_subscriptions(self, full_result: FASubmissionFull) -> list[Subscription]:
-        return await asyncio.to_thread(lambda: self._check_subscriptions(full_result))
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self.checker_executor,
+            self._check_subscriptions_static,
+            self.subscriptions,
+            self.blocklists,
+            full_result,
+        )
 
     def migrate_chat(self, old_chat_id: int, new_chat_id: int) -> None:
         # Migrate blocklist
