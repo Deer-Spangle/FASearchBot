@@ -13,6 +13,7 @@ from fa_search_bot.sites.sendable import UploadedMedia, DownloadedFile, SendSett
 from fa_search_bot.sites.sent_submission import SentSubmission
 from fa_search_bot.sites.submission_id import SubmissionID
 from fa_search_bot.subscriptions.fetch_queue import FetchQueue
+from fa_search_bot.subscriptions.subscription import Subscription
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 class SubmissionCheckState:
     sub_id: SubmissionID
     full_data: Optional[FASubmissionFull] = None
+    matching_subscriptions: Optional[list[Subscription]] = None
     media_downloading: bool = False
     dl_file: Optional[tuple[DownloadedFile, SendSettings]] = None
     media_uploading: bool = False
@@ -33,6 +35,7 @@ class SubmissionCheckState:
 
     def reset(self) -> None:
         self.full_data = None
+        self.matching_subscriptions = None
         self.media_downloading = False
         self.dl_file = None
         self.media_uploading = False
@@ -93,7 +96,12 @@ class WaitPool:
     async def get_next_for_data_fetch(self) -> SubmissionID:
         return self.fetch_data_queue.get_nowait()
 
-    async def set_fetched_data(self, sub_id: SubmissionID, full_data: FASubmissionFull) -> None:
+    async def set_fetched_data(
+            self,
+            sub_id: SubmissionID,
+            full_data: FASubmissionFull,
+            matching_subscriptions: list[Subscription],
+    ) -> None:
         # Provide backpressure on data fetcher, to avoid it running ahead of downstream processing
         # But only if that submission is not being actively handled somewhere
         if sub_id not in self.active_states:
@@ -104,6 +112,7 @@ class WaitPool:
             if sub_id not in self.submission_state:
                 return
             self.submission_state[sub_id].full_data = full_data
+            self.submission_state[sub_id].matching_subscriptions = matching_subscriptions
             # When data is fetched, copy to active states
             self.active_states[sub_id] = self.submission_state[sub_id]
 

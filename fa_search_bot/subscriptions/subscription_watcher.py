@@ -280,8 +280,16 @@ class SubscriptionWatcher:
                 matching_subscriptions.append(subscription)
         return matching_subscriptions
 
-    async def check_subscriptions(self, full_result: FASubmissionFull) -> list[Subscription]:
-        return self._check_subscriptions_static(self.subscriptions, self.blocklists, full_result)
+    async def check_subscriptions(
+            self,
+            full_result: FASubmissionFull,
+            subscriptions: Optional[list[Subscription]] = None,
+    ) -> list[Subscription]:
+        if subscriptions is None:
+            subscriptions = self.subscriptions
+        else:
+            subscriptions = list(set(subscriptions).intersection(self.subscriptions))
+        return self._check_subscriptions_static(subscriptions, self.blocklists, full_result)
         # loop = asyncio.get_running_loop()
         # return await loop.run_in_executor(
         #     self.checker_executor,

@@ -109,8 +109,8 @@ class Sender(Runnable):
         sendable = SendableFASubmission(state.full_data)
         # Check subscriptions
         with time_taken_checking_matches.time():
-            # Get subscriptions list again, because it might have changed since DataFetcher checked
-            subscriptions = await self.watcher.check_subscriptions(state.full_data)
+            # Check the previously-matched subscriptions again, in case any have been removed or blocklists have changed
+            subscriptions = await self.watcher.check_subscriptions(state.full_data, state.matching_subscriptions)
             # Map which subscriptions require this submission at each destination
             destination_map: Dict[int, List[Subscription]] = collections.defaultdict(lambda: [])
             for sub in subscriptions:

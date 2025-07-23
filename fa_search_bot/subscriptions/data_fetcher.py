@@ -112,7 +112,7 @@ class DataFetcher(Runnable):
         sub_total_matches.inc(len(matching_subscriptions))
         self.latest_id_gauge.set(sub_id.submission_id)
         with time_taken_publishing.time():
-            await self.watcher.wait_pool.set_fetched_data(sub_id, full_result)
+            await self.watcher.wait_pool.set_fetched_data(sub_id, full_result, matching_subscriptions)
 
     async def fetch_data(self, sub_id: SubmissionID) -> Optional[FASubmissionFull]:
         # Keep trying to fetch data, unless it is gone
