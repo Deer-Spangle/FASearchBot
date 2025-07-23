@@ -95,9 +95,11 @@ class WaitPool:
 
     async def set_fetched_data(self, sub_id: SubmissionID, full_data: FASubmissionFull) -> None:
         # Provide backpressure on data fetcher, to avoid it running ahead of downstream processing
-        while self.size_active() > self.max_ready_for_upload:
-            logger.debug("Waiting for media uploads to get below submission count limit")
-            await self._media_uploading_event.wait()
+        # But only if that submission is not being actively handled somewhere
+        if sub_id not in self.active_states:
+            while self.size_active() > self.max_ready_for_upload:
+                logger.debug("Waiting for media uploads to get below submission count limit")
+                await self._media_uploading_event.wait()
         async with self._lock:
             if sub_id not in self.submission_state:
                 return
