@@ -100,7 +100,7 @@ class DataFetcher(Runnable):
         counter_subs_found.inc()
         # See if any subscriptions match the submission
         with time_taken_checking_matches.time():
-            matching_subscriptions = self.watcher.check_subscriptions(full_result)
+            matching_subscriptions = await self.watcher.check_subscriptions(full_result)
         logger.debug("Submission %s matches %s subscriptions", sub_id, len(matching_subscriptions))
         # If submission doesn't match any subscriptions, drop it
         if not matching_subscriptions:

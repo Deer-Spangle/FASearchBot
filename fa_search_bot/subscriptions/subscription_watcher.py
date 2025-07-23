@@ -264,7 +264,7 @@ class SubscriptionWatcher:
         else:
             self.blocklists[destination] = {tag}
 
-    def check_subscriptions(self, full_result: FASubmissionFull) -> List[Subscription]:
+    def _check_subscriptions(self, full_result: FASubmissionFull) -> list[Subscription]:
         # Copy subscriptions, to avoid "changed size during iteration" issues
         subscriptions = self.subscriptions.copy()
         # Check which subscriptions match
@@ -277,6 +277,9 @@ class SubscriptionWatcher:
             if subscription.matches_result(full_result, blocklist_query):
                 matching_subscriptions.append(subscription)
         return matching_subscriptions
+
+    async def check_subscriptions(self, full_result: FASubmissionFull) -> list[Subscription]:
+        return await asyncio.to_thread(lambda: self._check_subscriptions(full_result))
 
     def migrate_chat(self, old_chat_id: int, new_chat_id: int) -> None:
         # Migrate blocklist
