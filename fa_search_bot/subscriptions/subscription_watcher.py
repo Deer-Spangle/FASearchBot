@@ -281,14 +281,15 @@ class SubscriptionWatcher:
         return matching_subscriptions
 
     async def check_subscriptions(self, full_result: FASubmissionFull) -> list[Subscription]:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            self.checker_executor,
-            self._check_subscriptions_static,
-            self.subscriptions,
-            self.blocklists,
-            full_result,
-        )
+        return self._check_subscriptions_static(self.subscriptions, self.blocklists, full_result)
+        # loop = asyncio.get_running_loop()
+        # return await loop.run_in_executor(
+        #     self.checker_executor,
+        #     self._check_subscriptions_static,
+        #     self.subscriptions,
+        #     self.blocklists,
+        #     full_result,
+        # )
 
     def migrate_chat(self, old_chat_id: int, new_chat_id: int) -> None:
         # Migrate blocklist
