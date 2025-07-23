@@ -72,6 +72,10 @@ single_message_send_timer = Summary(
 )
 
 
+class MediaMissing(Exception):
+    pass
+
+
 class Sender(Runnable):
     WAIT_BETWEEN_FLOOD_LOGS = datetime.timedelta(60)
     SEND_ATTEMPTS = 3
@@ -166,6 +170,13 @@ class Sender(Runnable):
                 await self.watcher.wait_pool.revert_data_fetch(sendable.submission_id)
                 send_attempts_needed_file_part_mising.observe(send_attempt)
                 return
+            except MediaMissing as e:
+                sub_update_send_failures.inc()
+                logger.warning(
+                    "Submission %s presented to Sender does not have uploaded or cached media. Resetting cache and retrying",
+                    sendable.submission_id,
+                )
+                await self.watcher.wait_pool.revert_data_fetch(sendable.submission_id)
             except Exception as e:
                 sub_update_send_failures.inc()
                 logger.error(
@@ -197,7 +208,11 @@ class Sender(Runnable):
                     updates_sent_fresh_cache.inc()
                     await self.watcher.wait_pool.set_cached(state.sub_id, cache_entry)
                     return
+            # If there's no uploaded media, and no cache entry, this should not have gotten to the Sender
+            # Previously, we passed None to sendable.send_message() so that it would handle download and upload, but it
+            # should not have gotten this far, so send it back.
             updates_sent_re_upload.inc()
+            raise MediaMissing()
         else:
             updates_sent_upload.inc()
         # Send message
