@@ -113,9 +113,7 @@ class WaitPool:
             if sub_id not in self.submission_state:
                 self.submission_state[sub_id] = SubmissionCheckState(sub_id)
             self.submission_state[sub_id].reset()
-            # Remove from active states
-            if sub_id in self.active_states:
-                del self.active_states[sub_id]
+            # Don't remove from active states, that would risk a deadlock
             # Re-queue for data fetch refresh
             await self.fetch_data_queue.put_refresh(sub_id)
 
