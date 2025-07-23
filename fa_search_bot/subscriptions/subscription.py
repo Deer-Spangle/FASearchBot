@@ -5,8 +5,38 @@ from typing import Optional, Dict, Any
 
 import dateutil.parser
 
-from fa_search_bot.subscriptions.query_parser import parse_query, Query, AndQuery
+from fa_search_bot.subscriptions.query_parser import parse_query, Query, AndQuery, NotQuery
 from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull
+
+
+class DestinationBlocklist:
+    def __init__(self, destination: int, blocklists: dict[str, Query]) -> None:
+        self.destination = destination
+        self.blocklists = blocklists
+
+    def count_blocks(self) -> int:
+        return len(self.blocklists)
+
+    def add(self, query: str) -> None:
+        self.blocklists[query] = parse_query(query)
+
+    def remove(self, query: str) -> None:
+        del self.blocklists[query]
+
+    def as_combined_query(self) -> Query:
+        return AndQuery([NotQuery(query) for query in self.blocklists.values()])
+
+    def to_json(self) -> list[dict[str, str]]:
+        return [{"query": query} for query in self.blocklists.keys()]
+
+    @classmethod
+    def from_query(cls, destination: int, data: list[dict[str, str]]) -> DestinationBlocklist:
+        return cls(destination, {entry["query"]: parse_query(entry["query"]) for entry in data})
+
+    @classmethod
+    def from_query(cls, destination: int, query: str) -> DestinationBlocklist:
+        parsed = parse_query(query)
+        return cls(destination, {query: parsed})
 
 
 class Subscription:

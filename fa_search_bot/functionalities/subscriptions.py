@@ -216,7 +216,7 @@ class BlocklistFunctionality(BotFunctionality):
     def _remove_from_blocklist(self, destination: int, query: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_REMOVE).inc()
         try:
-            self.watcher.blocklists.get(destination, set()).remove(query)
+            self.watcher.blocklists[destination].remove(query)
             self.watcher.save_to_json()
             return f'Removed tag from blocklist: "{query}".\n{self._list_blocklisted_tags(destination)}'
         except KeyError:
@@ -224,6 +224,6 @@ class BlocklistFunctionality(BotFunctionality):
 
     def _list_blocklisted_tags(self, destination: int) -> str:
         self.usage_counter.labels(function=self.USE_CASE_LIST).inc()
-        blocklist = self.watcher.blocklists.get(destination, set())
-        tags_list = "\n".join([f"- {tag}" for tag in blocklist])
+        blocklist = self.watcher.blocklists.get(destination)
+        tags_list = "\n".join([f"- {tag}" for tag in blocklist.blocklists.keys()])
         return f"Current blocklist for this chat:\n{tags_list}"

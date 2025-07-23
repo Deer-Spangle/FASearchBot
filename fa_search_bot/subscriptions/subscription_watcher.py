@@ -15,12 +15,12 @@ from fa_search_bot.config import SubscriptionWatcherConfig
 from fa_search_bot.subscriptions.media_downloader import MediaDownloader
 from fa_search_bot.subscriptions.media_uploader import MediaUploader
 from fa_search_bot.subscriptions.runnable import ShutdownError
-from fa_search_bot.subscriptions.query_parser import parse_query, Query, AndQuery, NotQuery
+from fa_search_bot.subscriptions.query_parser import AndQuery
 from fa_search_bot.sites.submission_id import SubmissionID
 from fa_search_bot.subscriptions.data_fetcher import DataFetcher
 from fa_search_bot.subscriptions.sender import Sender
 from fa_search_bot.subscriptions.sub_id_gatherer import SubIDGatherer
-from fa_search_bot.subscriptions.subscription import Subscription
+from fa_search_bot.subscriptions.subscription import Subscription, DestinationBlocklist
 from fa_search_bot.subscriptions.wait_pool import WaitPool
 
 if TYPE_CHECKING:
@@ -135,8 +135,7 @@ class SubscriptionWatcher:
         # Initialise stored data structures
         self.latest_ids: Deque[str] = collections.deque(maxlen=15)
         self.subscriptions: Set[Subscription] = set()
-        self.blocklists: Dict[int, Set[str]] = dict()
-        self.blocklist_query_cache: Dict[str, Query] = dict()
+        self.blocklists: dict[int, DestinationBlocklist] = dict()
 
         # Initialise sharing data structures
         self.wait_pool = WaitPool(self.config.max_ready_for_upload)
@@ -157,7 +156,7 @@ class SubscriptionWatcher:
         gauge_sub_active_destinations.set_function(
             lambda: len(set(s.destination for s in self.subscriptions if not s.paused))
         )
-        gauge_sub_blocks.set_function(lambda: sum(len(blocks) for blocks in self.blocklists.values()))
+        gauge_sub_blocks.set_function(lambda: sum(blocklist.count_blocks() for blocklist in self.blocklists.values()))
         gauge_wait_pool_size.set_function(lambda: self.wait_pool.size())
         gauge_wait_pool_active_size.set_function(lambda: self.wait_pool.size_active())
         gauge_fetch_queue_new_size.set_function(lambda: self.wait_pool.qsize_fetch_new())
@@ -250,19 +249,13 @@ class SubscriptionWatcher:
         self.latest_ids.append(sub_id.submission_id)
         self.save_to_json()
 
-    def get_blocklist_query(self, blocklist_str: str) -> Query:
-        if blocklist_str not in self.blocklist_query_cache:
-            self.blocklist_query_cache[blocklist_str] = parse_query(blocklist_str)
-        return self.blocklist_query_cache[blocklist_str]
-
     def add_to_blocklist(self, destination: int, tag: str) -> None:
-        # Ensure blocklist query can be parsed without error
-        self.blocklist_query_cache[tag] = parse_query(tag)
         # Add to blocklists
         if destination in self.blocklists:
+            # This will parse it too, hence validating it
             self.blocklists[destination].add(tag)
         else:
-            self.blocklists[destination] = {tag}
+            self.blocklists[destination] = DestinationBlocklist.from_query(destination, tag)
 
     def _check_subscriptions(self, full_result: FASubmissionFull) -> list[Subscription]:
         # Copy subscriptions, to avoid "changed size during iteration" issues
@@ -270,10 +263,11 @@ class SubscriptionWatcher:
         # Check which subscriptions match
         matching_subscriptions = []
         for subscription in subscriptions:
-            blocklist = self.blocklists.get(subscription.destination, set())
-            blocklist_query = AndQuery(
-                [NotQuery(self.get_blocklist_query(block)) for block in blocklist]
-            )
+            blocklist = self.blocklists.get(subscription.destination)
+            if blocklist is None:
+                blocklist_query = AndQuery([]) # TODO: seems silly?
+            else:
+                blocklist_query = blocklist.as_combined_query()
             if subscription.matches_result(full_result, blocklist_query):
                 matching_subscriptions.append(subscription)
         return matching_subscriptions
@@ -284,7 +278,7 @@ class SubscriptionWatcher:
     def migrate_chat(self, old_chat_id: int, new_chat_id: int) -> None:
         # Migrate blocklist
         if old_chat_id in self.blocklists:
-            for query in self.blocklists[old_chat_id]:
+            for query in self.blocklists[old_chat_id].blocklists.keys():
                 self.add_to_blocklist(new_chat_id, query)
         # Migrate subscriptions
         for subscription in self.subscriptions.copy():
@@ -306,9 +300,8 @@ class SubscriptionWatcher:
         )
         for subscription in self.subscriptions.copy():
             destination_dict[str(subscription.destination)]["subscriptions"].append(subscription.to_json())
-        for dest, block_queries in self.blocklists.items():
-            for block in block_queries:
-                destination_dict[str(dest)]["blocks"].append({"query": block})
+        for dest_blocklist in self.blocklists.values():
+            destination_dict[str(dest_blocklist.destination)]["blocks"] = dest_blocklist.to_json()
         data = {"latest_ids": list(self.latest_ids), "destinations": destination_dict}
         with open(self.FILENAME_TEMP, "w") as f:
             json.dump(data, f, indent=2)
@@ -353,7 +346,7 @@ class SubscriptionWatcher:
             for subscription in value["subscriptions"]:
                 subscriptions.add(Subscription.from_json_new_format(subscription, dest_id))
             if value["blocks"]:
-                new_watcher.blocklists[dest_id] = set(block["query"] for block in value["blocks"])
+                new_watcher.blocklists[dest_id] = DestinationBlocklist(dest_id, value["blocks"])
         logger.debug(f"Loaded {len(subscriptions)} subscriptions")
         new_watcher.subscriptions = subscriptions
         return new_watcher
