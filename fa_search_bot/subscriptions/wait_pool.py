@@ -184,6 +184,11 @@ class WaitPool:
                 return None
             next_state = min(submission_states, key=lambda state: state.key())
             if not next_state.is_ready_to_send():
+                if self.size() > self.max_ready_for_upload:
+                    logger.debug(
+                        "Backlog is large, but next submission in wait pool, %s, is unready to send",
+                        next_state.sub_id
+                    )
                 return None
             del self.submission_state[next_state.sub_id]
             del self.active_states[next_state.sub_id]
