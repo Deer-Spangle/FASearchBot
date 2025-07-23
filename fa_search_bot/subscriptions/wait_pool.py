@@ -192,6 +192,8 @@ class WaitPool:
                 return None
             del self.submission_state[next_state.sub_id]
             del self.active_states[next_state.sub_id]
+            self._media_uploading_event.set()
+            self._media_uploading_event.clear()
             return next_state
 
     async def return_populated_state(self, state: SubmissionCheckState) -> None:
