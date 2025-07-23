@@ -30,7 +30,7 @@ class DestinationBlocklist:
         return [{"query": query} for query in self.blocklists.keys()]
 
     @classmethod
-    def from_query(cls, destination: int, data: list[dict[str, str]]) -> DestinationBlocklist:
+    def from_json(cls, destination: int, data: list[dict[str, str]]) -> DestinationBlocklist:
         return cls(destination, {entry["query"]: parse_query(entry["query"]) for entry in data})
 
     @classmethod

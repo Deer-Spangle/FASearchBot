@@ -361,7 +361,7 @@ class SubscriptionWatcher:
             for subscription in value["subscriptions"]:
                 subscriptions.add(Subscription.from_json_new_format(subscription, dest_id))
             if value["blocks"]:
-                new_watcher.blocklists[dest_id] = DestinationBlocklist(dest_id, value["blocks"])
+                new_watcher.blocklists[dest_id] = DestinationBlocklist.from_json(dest_id, value["blocks"])
         logger.debug(f"Loaded {len(subscriptions)} subscriptions")
         new_watcher.subscriptions = subscriptions
         return new_watcher
