@@ -58,9 +58,9 @@ Taken from FurAffinity's search documentation:
 - `/list_subscriptions`
 - `/remove subscription [query]`
 
-- `/add_blocklisted_tag [tag]`
-- `/list_blocklisted_tags`
-- `/remove_blocklisted_tag [tag]`
+- `/add_block [tag]` Add a new query to the block list
+- `/list_blocks` List all blocked tags and queries in this chat
+- `/remove_block [tag]` Remove a blocked query from the list for this chat
 
 - `/pause [query?]` - Pauses all subscriptions in chat, or specified subscription
 - `/resume [query?]` - Resumes all subscriptions in chat, or specified subscription

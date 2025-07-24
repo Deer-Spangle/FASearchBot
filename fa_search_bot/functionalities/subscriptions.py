@@ -167,8 +167,11 @@ class SubscriptionFunctionality(BotFunctionality):
 
 class BlocklistFunctionality(BotFunctionality):
     add_block_tag_cmd = "add_blocklisted_tag"
+    add_block_tag_cmd_short = "add_block"
     remove_block_tag_cmd = "remove_blocklisted_tag"
+    remove_block_tag_cmd_short = "remove_block"
     list_block_tag_cmd = "list_blocklisted_tags"
+    list_block_tag_cmd_short = "list_blocks"
     USE_CASE_ADD = "block_add"
     USE_CASE_REMOVE = "block_remove"
     USE_CASE_LIST = "block_list"
@@ -176,8 +179,11 @@ class BlocklistFunctionality(BotFunctionality):
     def __init__(self, watcher: SubscriptionWatcher):
         commands = [
             self.add_block_tag_cmd,
+            self.add_block_tag_cmd_short,
             self.remove_block_tag_cmd,
+            self.remove_block_tag_cmd_short,
             self.list_block_tag_cmd,
+            self.list_block_tag_cmd_short,
         ]
         commands_pattern = re.compile(r"^/(" + "|".join(re.escape(c) for c in commands) + ")")
         super().__init__(NewMessage(pattern=commands_pattern, incoming=True))
@@ -192,11 +198,11 @@ class BlocklistFunctionality(BotFunctionality):
         destination = event.chat_id
         command = message_text.split()[0]
         args = message_text[len(command) :].strip()
-        if command.startswith("/" + self.add_block_tag_cmd):
+        if command.startswith("/" + self.add_block_tag_cmd) or command.startswith("/" + self.add_block_tag_cmd_short):
             await event.reply(self._add_to_blocklist(destination, args))
-        elif command.startswith("/" + self.remove_block_tag_cmd):
+        elif command.startswith("/" + self.remove_block_tag_cmd) or command.startswith("/" + self.remove_block_tag_cmd_short):
             await event.reply(self._remove_from_blocklist(destination, args))
-        elif command.startswith("/" + self.list_block_tag_cmd):
+        elif command.startswith("/" + self.list_block_tag_cmd) or command.startswith("/" + self.list_block_tag_cmd_short):
             await event.reply(self._list_blocklisted_tags(destination))
         else:
             await event.reply("I do not understand.")
@@ -210,7 +216,6 @@ class BlocklistFunctionality(BotFunctionality):
             self.watcher.add_to_blocklist(destination, query)
         except InvalidQueryException as e:
             return f"Failed to parse blocklist query: {e}"
-        self.watcher.save_to_json()
         return f'Added tag to blocklist: "{query}".\n{self._list_blocklisted_tags(destination)}'
 
     def _remove_from_blocklist(self, destination: int, query: str) -> str:
