@@ -87,16 +87,14 @@ class SubscriptionFunctionality(BotFunctionality):
             return f"Failed to parse subscription query: {html.escape(str(e))}"
         if new_sub in self.watcher.subscriptions:
             return f'A subscription already exists for "{html.escape(query)}".'
-        self.watcher.subscriptions.add(new_sub)
-        self.watcher.save_to_json()
+        self.watcher.add_subscription(new_sub)
         return f'Added subscription: "{html.escape(query)}".\n{self._list_subs(destination)}'
 
     def _remove_sub(self, destination: int, query: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_REMOVE).inc()
         old_sub = Subscription(query, destination)
         try:
-            self.watcher.subscriptions.remove(old_sub)
-            self.watcher.save_to_json()
+            self.watcher.remove_subscription(old_sub)
             return f'Removed subscription: "{html.escape(query)}".\n{self._list_subs(destination)}'
         except KeyError:
             return f'There is not a subscription for "{html.escape(query)}" in this chat.'
@@ -221,8 +219,7 @@ class BlocklistFunctionality(BotFunctionality):
     def _remove_from_blocklist(self, destination: int, query: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_REMOVE).inc()
         try:
-            self.watcher.blocklists[destination].remove(query)
-            self.watcher.save_to_json()
+            self.watcher.remove_from_blocklist(destination, query)
             return f'Removed tag from blocklist: "{query}".\n{self._list_blocklisted_tags(destination)}'
         except KeyError:
             return f'The tag "{query}" is not on the blocklist for this chat.'

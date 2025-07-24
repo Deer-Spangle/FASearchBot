@@ -253,13 +253,30 @@ class SubscriptionWatcher:
         self.latest_ids.append(sub_id.submission_id)
         self.save_to_json()
 
-    def add_to_blocklist(self, destination: int, tag: str) -> None:
+    def add_subscription(self, subscription: Subscription) -> None:
+        self.subscriptions.add(subscription)
+        self.save_to_json()
+
+    def remove_subscription(self, subscription: Subscription) -> None:
+        self.subscriptions.remove(subscription)
+        self.save_to_json()
+
+    def add_to_blocklist(self, destination: int, block_query: str) -> None:
         # Add to blocklists
         if destination in self.blocklists:
             # This will parse it too, hence validating it
-            self.blocklists[destination].add(tag)
+            self.blocklists[destination].add(block_query)
         else:
             self.blocklists[destination] = DestinationBlocklist.from_query(destination, tag)
+            self.blocklists[destination] = DestinationBlocklist.from_query(destination, block_query)
+        # Save the json
+        self.save_to_json()
+
+    def remove_from_blocklist(self, destination: int, block_query: str) -> None:
+        # Remove query from blocklist
+        self.blocklists[destination].remove(block_query)
+        # Save the json
+        self.save_to_json()
 
     @staticmethod
     def _check_subscriptions_static(
