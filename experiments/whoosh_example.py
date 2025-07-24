@@ -9,7 +9,8 @@ from whoosh.searching import Searcher
 
 from fa_search_bot.subscriptions.query_parser import Query, OrQuery, AndQuery, RatingQuery, WordQuery, PrefixQuery, RegexQuery, \
     PhraseQuery, TitleField, DescriptionField, KeywordField
-from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull, Rating, FAUser
+from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull, FAUser
+from fa_search_bot.sites.submission import Rating
 from fa_search_bot.subscriptions.subscription_watcher import rating_dict
 from fa_search_bot.subscriptions.subscription import Subscription
 

@@ -19,7 +19,7 @@ from fa_search_bot.subscriptions.query_parser import (
     WordQuery,
     parse_query,
 )
-from fa_search_bot.sites.furaffinity.fa_submission import Rating
+from fa_search_bot.sites.submission import Rating
 
 
 def test_parser():

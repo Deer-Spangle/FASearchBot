@@ -5,8 +5,8 @@ from typing import Optional, Dict, Any
 
 import dateutil.parser
 
+from fa_search_bot.sites.submission import QueryTarget
 from fa_search_bot.subscriptions.query_parser import parse_query, Query, AndQuery, NotQuery
-from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull
 
 
 class DestinationBlocklist:
@@ -47,7 +47,7 @@ class Subscription:
         self.query = parse_query(query_str)
         self.paused = False
 
-    def matches_result(self, result: FASubmissionFull, blocklist_query: Optional[Query]) -> bool:
+    def matches_result(self, result: QueryTarget, blocklist_query: Optional[Query]) -> bool:
         if self.paused:
             return False
         full_query = self.query

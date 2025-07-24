@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 import re
 from abc import ABC
-from enum import Enum
 from typing import TYPE_CHECKING, TypedDict, Dict
 
 import aiohttp
 import dateutil.parser
 from telethon import Button
+
+from fa_search_bot.sites.submission import Rating, QueryTarget
 
 if TYPE_CHECKING:
     import datetime
@@ -19,13 +20,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-class Rating(Enum):
-    GENERAL = 1
-    MATURE = 2
-    ADULT = 3
-
 
 UserShortResp = TypedDict(
     "UserShortResp",
@@ -249,6 +243,15 @@ class FASubmissionFull(FASubmissionShort):
     @property
     def download_file_ext(self) -> str:
         return self.download_url.split(".")[-1].lower()
+
+    def to_query_target(self) -> QueryTarget:
+        return QueryTarget(
+            title=[self.title],
+            keywords=self.keywords,
+            description=[self.description],
+            artist=[self.author.name, self.author.profile_name],
+            rating=self.rating,
+        )
 
 
 class FAStatus:

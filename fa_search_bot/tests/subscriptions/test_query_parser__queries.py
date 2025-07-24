@@ -17,7 +17,8 @@ from fa_search_bot.subscriptions.query_parser import (
     TitleField,
     WordQuery,
 )
-from fa_search_bot.sites.furaffinity.fa_submission import FAUser, Rating
+from fa_search_bot.sites.furaffinity.fa_submission import FAUser
+from fa_search_bot.sites.submission import Rating
 from fa_search_bot.tests.util.submission_builder import SubmissionBuilder
 
 

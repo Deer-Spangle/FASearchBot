@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from prometheus_client import Gauge
 
 from fa_search_bot.config import SubscriptionWatcherConfig
+from fa_search_bot.sites.submission import QueryTarget
 from fa_search_bot.subscriptions.media_downloader import MediaDownloader
 from fa_search_bot.subscriptions.media_uploader import MediaUploader
 from fa_search_bot.subscriptions.runnable import ShutdownError
@@ -30,7 +31,6 @@ if TYPE_CHECKING:
     from telethon import TelegramClient
 
     from fa_search_bot.sites.furaffinity.fa_export_api import FAExportAPI
-    from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull
     from fa_search_bot.submission_cache import SubmissionCache
 
 logger = logging.getLogger(__name__)
@@ -331,7 +331,7 @@ class SubscriptionWatcher:
     def _check_subscriptions_static(
             subscriptions: set[Subscription],
             blocklists: dict[int, DestinationBlocklist],
-            full_result: FASubmissionFull,
+            full_result: QueryTarget,
     ) -> list[Subscription]:
         # Copy subscriptions, to avoid "changed size during iteration" issues
         subscriptions = subscriptions.copy()
@@ -348,21 +348,21 @@ class SubscriptionWatcher:
 
     async def check_subscriptions(
             self,
-            full_result: FASubmissionFull,
+            query_target: QueryTarget,
             subscriptions: Optional[list[Subscription]] = None,
     ) -> list[Subscription]:
         if subscriptions is None:
             subscriptions = self.subscriptions
         else:
             subscriptions = list(set(subscriptions).intersection(self.subscriptions))
-        return self._check_subscriptions_static(subscriptions, self.blocklists, full_result)
+        return self._check_subscriptions_static(subscriptions, self.blocklists, query_target)
         # loop = asyncio.get_running_loop()
         # return await loop.run_in_executor(
         #     self.checker_executor,
         #     self._check_subscriptions_static,
         #     self.subscriptions,
         #     self.blocklists,
-        #     full_result,
+        #     query_target,
         # )
 
     def migrate_chat(self, old_chat_id: int, new_chat_id: int) -> None:
