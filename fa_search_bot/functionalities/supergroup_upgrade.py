@@ -41,5 +41,5 @@ class SupergroupUpgradeFunctionality(BotFunctionality):
         logger.info("Migration from chat ID: %s to chat ID: %s", old_chat_id, new_chat_id)
         self.usage_counter.labels(function="supergroup_upgrade").inc()
         # Upgrade subscriptions and block queries
-        self.watcher.migrate_chat(old_chat_id, new_chat_id)
+        await self.watcher.migrate_chat(old_chat_id, new_chat_id)
         raise StopPropagation

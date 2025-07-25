@@ -5,11 +5,12 @@ import collections
 import datetime
 import json
 import logging
-import os
 from asyncio import Task
 from concurrent.futures import ProcessPoolExecutor
 from typing import TYPE_CHECKING
 
+import aiofiles
+import aiofiles.os
 from prometheus_client import Gauge
 
 from fa_search_bot.config import SubscriptionWatcherConfig
@@ -257,39 +258,39 @@ class SubscriptionWatcher:
             self.latest_observed_submission = post_datetime
             latest_sub_posted_at.set(post_datetime.timestamp())
 
-    def update_latest_id(self, sub_id: SubmissionID) -> None:
+    async def update_latest_id(self, sub_id: SubmissionID) -> None:
         self.latest_ids.append(sub_id.submission_id)
-        self.save_to_json()
+        await self.save_to_json()
 
-    def add_subscription(self, subscription: Subscription) -> None:
+    async def add_subscription(self, subscription: Subscription) -> None:
         self.subscriptions.add(subscription)
-        self.save_to_json()
+        await self.save_to_json()
 
-    def remove_subscription(self, subscription: Subscription) -> None:
+    async def remove_subscription(self, subscription: Subscription) -> None:
         self.subscriptions.remove(subscription)
-        self.save_to_json()
+        await self.save_to_json()
 
-    def pause_subscription(self, subscription: Subscription) -> None:
+    async def pause_subscription(self, subscription: Subscription) -> None:
         if subscription not in self.subscriptions:
             raise KeyError
         matching = [sub for sub in self.subscriptions if sub == subscription][0]
         if matching.paused:
             raise SubscriptionAlreadyPaused()
         matching.paused = True
-        self.save_to_json()
+        await self.save_to_json()
         return
 
-    def resume_subscription(self, subscription: Subscription) -> None:
+    async def resume_subscription(self, subscription: Subscription) -> None:
         if subscription not in self.subscriptions:
             raise KeyError
         matching = [sub for sub in self.subscriptions if sub == subscription][0]
         if not matching.paused:
             raise SubscriptionAlreadyRunning()
         matching.paused = False
-        self.save_to_json()
+        await self.save_to_json()
         return
 
-    def pause_destination(self, destination: int) -> None:
+    async def pause_destination(self, destination: int) -> None:
         subs = [sub for sub in self.subscriptions if sub.destination == destination]
         if not subs:
             raise KeyError
@@ -297,10 +298,10 @@ class SubscriptionWatcher:
         if not running_subs:
             raise SubscriptionAlreadyPaused()
         for sub in running_subs:
-            self.pause_subscription(sub)
-        self.save_to_json()
+            await self.pause_subscription(sub)
+        await self.save_to_json()
 
-    def resume_destination(self, destination: int) -> None:
+    async def resume_destination(self, destination: int) -> None:
         subs = [sub for sub in self.subscriptions if sub.destination == destination]
         if not subs:
             raise KeyError
@@ -308,10 +309,10 @@ class SubscriptionWatcher:
         if not running_subs:
             raise SubscriptionAlreadyRunning()
         for sub in running_subs:
-            self.resume_subscription(sub)
-        self.save_to_json()
+            await self.resume_subscription(sub)
+        await self.save_to_json()
 
-    def add_to_blocklist(self, destination: int, block_query: str) -> None:
+    async def add_to_blocklist(self, destination: int, block_query: str) -> None:
         # Add to blocklists
         if destination in self.blocklists:
             # This will parse it too, hence validating it
@@ -319,13 +320,13 @@ class SubscriptionWatcher:
         else:
             self.blocklists[destination] = DestinationBlocklist.from_query(destination, block_query)
         # Save the json
-        self.save_to_json()
+        await self.save_to_json()
 
-    def remove_from_blocklist(self, destination: int, block_query: str) -> None:
+    async def remove_from_blocklist(self, destination: int, block_query: str) -> None:
         # Remove query from blocklist
         self.blocklists[destination].remove(block_query)
         # Save the json
-        self.save_to_json()
+        await self.save_to_json()
 
     @staticmethod
     def _check_subscriptions_static(
@@ -365,11 +366,11 @@ class SubscriptionWatcher:
         #     query_target,
         # )
 
-    def migrate_chat(self, old_chat_id: int, new_chat_id: int) -> None:
+    async def migrate_chat(self, old_chat_id: int, new_chat_id: int) -> None:
         # Migrate blocklist
         if old_chat_id in self.blocklists:
             for query in self.blocklists[old_chat_id].blocklists.keys():
-                self.add_to_blocklist(new_chat_id, query)
+                await self.add_to_blocklist(new_chat_id, query)
         # Migrate subscriptions
         for subscription in self.subscriptions.copy():
             if subscription.destination == old_chat_id:
@@ -379,11 +380,12 @@ class SubscriptionWatcher:
                 self.subscriptions.add(subscription)
         # Remove old blocklist
         if old_chat_id in self.blocklists:
-            del self.blocklists[old_chat_id]
+            for block_query in self.blocklists[old_chat_id].blocklists.keys():
+                await self.remove_from_blocklist(old_chat_id, block_query)
         # Save
-        self.save_to_json()
+        await self.save_to_json()
 
-    def save_to_json(self) -> None:
+    async def save_to_json(self) -> None:
         logger.debug("Saving subscription data in new format")
         destination_dict: Dict[str, Dict[str, List]] = collections.defaultdict(
             lambda: {"subscriptions": [], "blocks": []}
@@ -393,9 +395,10 @@ class SubscriptionWatcher:
         for dest_blocklist in self.blocklists.values():
             destination_dict[str(dest_blocklist.destination)]["blocks"] = dest_blocklist.to_json()
         data = {"latest_ids": list(self.latest_ids), "destinations": destination_dict}
-        with open(self.FILENAME_TEMP, "w") as f:
-            json.dump(data, f, indent=2)
-        os.replace(self.FILENAME_TEMP, self.FILENAME)
+        async with aiofiles.open(self.FILENAME_TEMP, "w") as f:
+            json_data = json.dumps(data, indent=2)
+            await f.write(json_data)
+        await aiofiles.os.replace(self.FILENAME_TEMP, self.FILENAME)
 
     @classmethod
     def load_from_json(
@@ -407,6 +410,7 @@ class SubscriptionWatcher:
     ) -> "SubscriptionWatcher":
         logger.debug("Loading subscription config from file")
         try:
+            # This can be sync, because it's only used in the SubscriptionWatcher __init__() method
             with open(cls.FILENAME, "r") as f:
                 raw_data = f.read()
                 if not raw_data:

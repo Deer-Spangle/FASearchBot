@@ -102,7 +102,7 @@ class Sender(Runnable):
         self.watcher.update_latest_observed(next_state.full_data.posted_at)
         # Update latest ids with the submission we just checked, and save config
         with time_taken_saving_config.time():
-            self.watcher.update_latest_id(next_state.sub_id)
+            await self.watcher.update_latest_id(next_state.sub_id)
         self.latest_id_gauge.set(next_state.sub_id.submission_id)
 
     async def _send_updates(self, state: SubmissionCheckState) -> None:
