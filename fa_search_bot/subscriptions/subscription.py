@@ -56,9 +56,11 @@ class Subscription:
         if self.paused:
             return False
         full_query = self.query
-        if blocklist_query:
-            full_query = AndQuery([self.query, blocklist_query])
-        return full_query.matches_submission(result)
+        if blocklist_query is not None:
+            # Checking this way, rather than constructing an AndQuery, is twice as fast.
+            return self.query.matches_submission(result) and blocklist_query.matches_submission(result)
+            # full_query = AndQuery([self.query, blocklist_query])
+        return self.query.matches_submission(result)
 
     def to_json(self) -> Dict:
         latest_update_str = None
