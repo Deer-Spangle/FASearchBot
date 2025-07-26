@@ -13,18 +13,23 @@ class DestinationBlocklist:
     def __init__(self, destination: int, blocklists: dict[str, Query]) -> None:
         self.destination = destination
         self.blocklists = blocklists
+        self._combined_query: Optional[Query] = None
 
     def count_blocks(self) -> int:
         return len(self.blocklists)
 
     def add(self, query: str) -> None:
         self.blocklists[query] = parse_query(query)
+        self._combined_query = None
 
     def remove(self, query: str) -> None:
         del self.blocklists[query]
+        self._combined_query = None
 
     def as_combined_query(self) -> Query:
-        return AndQuery([NotQuery(query) for query in self.blocklists.values()])
+        if self._combined_query is None:
+            self._combined_query = AndQuery([NotQuery(query) for query in self.blocklists.values()])
+        return self._combined_query
 
     def to_json(self) -> list[dict[str, str]]:
         return [{"query": query} for query in self.blocklists.keys()]
