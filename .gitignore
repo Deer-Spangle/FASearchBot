@@ -17,3 +17,5 @@ subscriptions.json*
 # Bot logs and sandbox
 logs/
 sandbox/
+/experiments/perf_profile_submission_data.json
+/experiments/perf_profile_subscriptions.json
