@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 
 import dateutil.parser
 
-from fa_search_bot.sites.submission import QueryTarget
+from fa_search_bot.subscriptions.query_target import QueryTarget
 from fa_search_bot.subscriptions.query_parser import parse_query, Query, AndQuery, NotQuery
 
 

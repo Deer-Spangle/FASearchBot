@@ -14,7 +14,7 @@ import aiofiles.os
 from prometheus_client import Gauge
 
 from fa_search_bot.config import SubscriptionWatcherConfig
-from fa_search_bot.sites.submission import QueryTarget
+from fa_search_bot.subscriptions.query_target import QueryTarget
 from fa_search_bot.subscriptions.media_downloader import MediaDownloader
 from fa_search_bot.subscriptions.media_uploader import MediaUploader
 from fa_search_bot.subscriptions.runnable import ShutdownError
