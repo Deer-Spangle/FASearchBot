@@ -120,7 +120,9 @@ class WaitPool:
         # This reverts a submission back to before any data was fetched about it, and re-queues it for data fetch
         async with self._lock:
             if sub_id not in self.submission_state:
-                self.submission_state[sub_id] = SubmissionCheckState(sub_id)
+                new_sub_id = SubmissionCheckState(sub_id)
+                self.submission_state[sub_id] = new_sub_id
+                self.active_states[sub_id] = new_sub_id
             self.submission_state[sub_id].reset()
             # Don't remove from active states, that would risk a deadlock
             # Re-queue for data fetch refresh
