@@ -71,10 +71,10 @@ class RefreshCounter:
 
 class FetchQueue:
 
-    def __init__(self):
+    def __init__(self, refresh_limit: int = 100):
         self._new_queue: Queue[SubmissionID] = Queue()
         self._refresh_queue: Queue[SubmissionID] = Queue()
-        self.refresh_counter = RefreshCounter(refresh_limit=100)
+        self.refresh_counter = RefreshCounter(refresh_limit=refresh_limit)  # TODO: configurable
 
     def get_nowait(self) -> SubmissionID:
         try:

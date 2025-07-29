@@ -9,7 +9,7 @@ from prometheus_client import Counter
 
 from fa_search_bot.bot import FASearchBot
 from fa_search_bot.config import Config, DEFAULT_MAX_READY_FOR_UPLOAD, DEFAULT_NUM_DATA_FETCHERS, \
-    DEFAULT_NUM_MEDIA_DOWNLOADERS, DEFAULT_NUM_MEDIA_UPLOADERS
+    DEFAULT_NUM_MEDIA_DOWNLOADERS, DEFAULT_NUM_MEDIA_UPLOADERS, DEFAULT_FETCH_REFRESH_LIMIT
 
 log_entries = Counter(
     "fasearchbot_log_messages_total",
@@ -49,6 +49,7 @@ def setup_logging(log_level: str = "INFO") -> None:
 @click.option("--sub-watcher-media-downloaders", type=int, default=DEFAULT_NUM_MEDIA_DOWNLOADERS, help="Number of MediaDownloader tasks which should spin up in the subscription watcher")
 @click.option("--sub-watcher-media-uploaders", type=int, default=DEFAULT_NUM_MEDIA_UPLOADERS, help="Number of MediaUploader tasks which should spin up in the subscription watcher")
 @click.option("--sub-watcher-max-ready-for-upload", type=int, default=DEFAULT_MAX_READY_FOR_UPLOAD, help="Maximum number of submissions which should have data and media fetched before being uploaded to Telegram, to prevent data being too stale by the time it comes to upload, especially if catching up on backlog")
+@click.option("--fetch-max-data-refresh", type=int, default=DEFAULT_FETCH_REFRESH_LIMIT, help="How many times a submission should get pushed back for data refresh before giving up and declaring the submission media to be broken")
 def main(
         log_level: str,
         no_subscriptions: bool,
@@ -56,6 +57,7 @@ def main(
         sub_watcher_media_downloaders: int,
         sub_watcher_media_uploaders: int,
         sub_watcher_max_ready_for_upload: int,
+        fetch_max_data_refresh: int,
 ) -> None:
     setup_logging(log_level)
     # Construct config and ingest flags
@@ -65,6 +67,7 @@ def main(
     config.subscription_watcher.num_media_downloaders = sub_watcher_media_downloaders
     config.subscription_watcher.num_media_uploaders = sub_watcher_media_uploaders
     config.subscription_watcher.max_ready_for_upload = sub_watcher_max_ready_for_upload
+    config.subscription_watcher.fetch_refresh_limit = fetch_max_data_refresh
     # Create and start the bot
     bot = FASearchBot(config)
     loop = asyncio.get_event_loop()

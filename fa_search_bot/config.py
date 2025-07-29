@@ -8,6 +8,7 @@ DEFAULT_NUM_DATA_FETCHERS = 2
 DEFAULT_NUM_MEDIA_DOWNLOADERS = 2
 DEFAULT_NUM_MEDIA_UPLOADERS = 1
 DEFAULT_MAX_READY_FOR_UPLOAD = 100    # Maximum number of submissions which should be ready for media upload, to prevent data being too stale by the time it comes to upload, especially if catching up on backlog
+DEFAULT_FETCH_REFRESH_LIMIT = 25
 
 
 @dataclasses.dataclass
@@ -47,6 +48,7 @@ class SubscriptionWatcherConfig:
     num_media_downloaders: int
     num_media_uploaders: int
     max_ready_for_upload: int
+    fetch_refresh_limit: int
 
     def total_num_task_runners(self) -> int:
         return self.num_data_fetchers + self.num_media_downloaders + self.num_media_uploaders
@@ -59,6 +61,7 @@ class SubscriptionWatcherConfig:
             num_media_downloaders=conf.get("num_media_downloaders", DEFAULT_NUM_MEDIA_DOWNLOADERS),
             num_media_uploaders=conf.get("num_media_uploaders", DEFAULT_NUM_MEDIA_UPLOADERS),
             max_ready_for_upload=conf.get("max_ready_for_upload", DEFAULT_MAX_READY_FOR_UPLOAD),
+            fetch_refresh_limit=conf.get("fetch_refresh_limit", DEFAULT_FETCH_REFRESH_LIMIT),
         )
 
 
