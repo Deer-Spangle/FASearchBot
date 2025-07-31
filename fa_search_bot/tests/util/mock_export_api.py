@@ -6,7 +6,8 @@ import string
 from typing import TYPE_CHECKING
 
 from fa_search_bot.sites.furaffinity.fa_export_api import FAExportAPI, PageNotFound
-from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull, FAUser, Rating
+from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull, FAUser
+from fa_search_bot.sites.submission import Rating
 
 if TYPE_CHECKING:
     from typing import List, Union

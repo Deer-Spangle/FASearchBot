@@ -20,14 +20,12 @@ from pyparsing import (
     printables,
 )
 
-from fa_search_bot.sites.furaffinity.fa_submission import Rating
+from fa_search_bot.sites.submission import Rating, QueryTarget
 
 if TYPE_CHECKING:
-    from typing import Any, Dict, List, Optional, Pattern, Sequence
+    from typing import Any, Optional, Pattern, Sequence
 
     from pyparsing import ParserElement, ParseResults
-
-    from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull
 
 
 logger = logging.getLogger(__name__)
@@ -48,15 +46,15 @@ boundary_pattern_start = r"(?:^|(?<=[\s" + re.escape(punctuation) + "]))"
 boundary_pattern_end = r"(?:(?=[\s" + re.escape(punctuation) + "])|$)"
 
 
-def _split_text_to_words(text: str) -> List[str]:
+def _split_text_to_words(text: str) -> list[str]:
     return re.split(punctuation_pattern, text)
 
 
-def _clean_word_list(words: List[str]) -> List[str]:
+def _clean_word_list(words: list[str]) -> list[str]:
     return [x.lower().strip(punctuation) for x in words]
 
 
-def _split_text_to_cleaned_words(text: str) -> List[str]:
+def _split_text_to_cleaned_words(text: str) -> list[str]:
     return _clean_word_list(_split_text_to_words(text))
 
 
@@ -65,15 +63,15 @@ FieldLocation = NewType("FieldLocation", str)
 
 class Field(ABC):
     @abstractmethod
-    def get_field_words(self, sub: FASubmissionFull) -> List[str]:
+    def get_field_words(self, sub: QueryTarget) -> list[str]:
         raise NotImplementedError
 
     @abstractmethod
-    def get_texts(self, sub: FASubmissionFull) -> List[str]:
+    def get_texts(self, sub: QueryTarget) -> list[str]:
         raise NotImplementedError
 
     @abstractmethod
-    def get_texts_dict(self, sub: FASubmissionFull) -> Dict[FieldLocation, str]:
+    def get_texts_dict(self, sub: QueryTarget) -> dict[FieldLocation, str]:
         raise NotImplementedError
 
     def __eq__(self, other: Any) -> bool:
@@ -84,54 +82,51 @@ class Field(ABC):
 
 
 class KeywordField(Field):
-    def get_field_words(self, sub: FASubmissionFull) -> List[str]:
+    def get_field_words(self, sub: QueryTarget) -> list[str]:
         return _clean_word_list(sub.keywords)
 
-    def get_texts(self, sub: FASubmissionFull) -> List[str]:
+    def get_texts(self, sub: QueryTarget) -> list[str]:
         return sub.keywords
 
-    def get_texts_dict(self, sub: FASubmissionFull) -> Dict[FieldLocation, str]:
+    def get_texts_dict(self, sub: QueryTarget) -> dict[FieldLocation, str]:
         return {FieldLocation(f"keyword_{num}"): keyword for num, keyword in enumerate(sub.keywords)}
 
 
 class TitleField(Field):
-    def get_field_words(self, sub: FASubmissionFull) -> List[str]:
-        return _split_text_to_cleaned_words(sub.title)
+    def get_field_words(self, sub: QueryTarget) -> list[str]:
+        return sum([_split_text_to_cleaned_words(title) for title in sub.title], start=[])
 
-    def get_texts(self, sub: FASubmissionFull) -> List[str]:
-        return [sub.title]
+    def get_texts(self, sub: QueryTarget) -> list[str]:
+        return sub.title
 
-    def get_texts_dict(self, sub: FASubmissionFull) -> Dict[FieldLocation, str]:
-        return {FieldLocation("title"): sub.title}
+    def get_texts_dict(self, sub: QueryTarget) -> dict[FieldLocation, str]:
+        return {FieldLocation(f"title_{num}"): title for num, title in enumerate(sub.title)}
 
 
 class DescriptionField(Field):
-    def get_field_words(self, sub: FASubmissionFull) -> List[str]:
-        return _split_text_to_cleaned_words(sub.description)
+    def get_field_words(self, sub: QueryTarget) -> list[str]:
+        return sum([_split_text_to_cleaned_words(desc) for desc in sub.description], start=[])
 
-    def get_texts(self, sub: FASubmissionFull) -> List[str]:
-        return [sub.description]
+    def get_texts(self, sub: QueryTarget) -> list[str]:
+        return sub.description
 
-    def get_texts_dict(self, sub: FASubmissionFull) -> Dict[FieldLocation, str]:
-        return {FieldLocation("description"): sub.description}
+    def get_texts_dict(self, sub: QueryTarget) -> dict[FieldLocation, str]:
+        return {FieldLocation(f"description_{num}"): desc for num, desc in enumerate(sub.description)}
 
 
 class ArtistField(Field):
-    def get_field_words(self, sub: FASubmissionFull) -> List[str]:
-        return [sub.author.name.lower(), sub.author.profile_name.lower()]
+    def get_field_words(self, sub: QueryTarget) -> list[str]:
+        return [artist.lower() for artist in sub.artist]
 
-    def get_texts(self, sub: FASubmissionFull) -> List[str]:
-        return [sub.author.name, sub.author.profile_name]
+    def get_texts(self, sub: QueryTarget) -> list[str]:
+        return sub.artist
 
-    def get_texts_dict(self, sub: FASubmissionFull) -> Dict[FieldLocation, str]:
-        return {
-            FieldLocation("name"): sub.author.name,
-            FieldLocation("profile_name"): sub.author.profile_name,
-        }
+    def get_texts_dict(self, sub: QueryTarget) -> dict[FieldLocation, str]:
+        return {FieldLocation(f"artist_{num}"): artist for num, artist in enumerate(sub.artist)}
 
 
 class AnyField(Field):
-    def get_field_words(self, sub: FASubmissionFull) -> List[str]:
+    def get_field_words(self, sub: QueryTarget) -> list[str]:
         return [
             *TitleField().get_field_words(sub),
             *DescriptionField().get_field_words(sub),
@@ -139,7 +134,7 @@ class AnyField(Field):
             *ArtistField().get_field_words(sub),
         ]
 
-    def get_texts(self, sub: FASubmissionFull) -> List[str]:
+    def get_texts(self, sub: QueryTarget) -> list[str]:
         return [
             *TitleField().get_texts(sub),
             *DescriptionField().get_texts(sub),
@@ -147,7 +142,7 @@ class AnyField(Field):
             *ArtistField().get_texts(sub),
         ]
 
-    def get_texts_dict(self, sub: FASubmissionFull) -> Dict[FieldLocation, str]:
+    def get_texts_dict(self, sub: QueryTarget) -> dict[FieldLocation, str]:
         return {
             **TitleField().get_texts_dict(sub),
             **DescriptionField().get_texts_dict(sub),
@@ -170,7 +165,7 @@ class MatchLocation:
         else:
             return location.end_position > self.start_position
 
-    def overlaps_any(self, locations: List["MatchLocation"]) -> bool:
+    def overlaps_any(self, locations: list["MatchLocation"]) -> bool:
         return any(self.overlaps(location) for location in locations)
 
     def __eq__(self, other: Any) -> bool:
@@ -190,13 +185,13 @@ class MatchLocation:
 
 class Query(ABC):
     @abstractmethod
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         raise NotImplementedError
 
 
 class LocationQuery(Query, ABC):
     @abstractmethod
-    def match_locations(self, sub: FASubmissionFull) -> List[MatchLocation]:
+    def match_locations(self, sub: QueryTarget) -> list[MatchLocation]:
         raise NotImplementedError
 
 
@@ -204,7 +199,7 @@ class OrQuery(Query):
     def __init__(self, sub_queries: Sequence["Query"]):
         self.sub_queries = sub_queries
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         return any(q.matches_submission(sub) for q in self.sub_queries)
 
     def __eq__(self, other: Any) -> bool:
@@ -222,20 +217,20 @@ class OrQuery(Query):
 
 
 class LocationOrQuery(OrQuery, LocationQuery):
-    def __init__(self, sub_queries: List["LocationQuery"]):
+    def __init__(self, sub_queries: list["LocationQuery"]):
         super().__init__(sub_queries)
         # Set it again, so we know sub_queries are LocationQuery objects, rather than just Query objects
-        self.sub_queries: List["LocationQuery"] = sub_queries
+        self.sub_queries: list["LocationQuery"] = sub_queries
 
-    def match_locations(self, sub: FASubmissionFull) -> List[MatchLocation]:
+    def match_locations(self, sub: QueryTarget) -> list[MatchLocation]:
         return list(set(match for q in self.sub_queries for match in q.match_locations(sub)))
 
 
 class AndQuery(Query):
-    def __init__(self, sub_queries: List["Query"]):
+    def __init__(self, sub_queries: list["Query"]):
         self.sub_queries = sub_queries
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         return all(q.matches_submission(sub) for q in self.sub_queries)
 
     def __eq__(self, other: Any) -> bool:
@@ -256,7 +251,7 @@ class NotQuery(Query):
     def __init__(self, sub_query: "Query"):
         self.sub_query = sub_query
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         return not self.sub_query.matches_submission(sub)
 
     def __eq__(self, other: Any) -> bool:
@@ -273,7 +268,7 @@ class RatingQuery(Query):
     def __init__(self, rating: Rating):
         self.rating = rating
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         return sub.rating == self.rating
 
     def __eq__(self, other: Any) -> bool:
@@ -293,10 +288,10 @@ class WordQuery(LocationQuery):
             field = AnyField()
         self.field = field
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         return self.word.lower() in self.field.get_field_words(sub)
 
-    def match_locations(self, sub: FASubmissionFull) -> List[MatchLocation]:
+    def match_locations(self, sub: QueryTarget) -> list[MatchLocation]:
         regex = re.compile(boundary_pattern_start + re.escape(self.word) + boundary_pattern_end, re.I)
         return [
             MatchLocation(location, m.start(), m.end())
@@ -325,13 +320,13 @@ class PrefixQuery(LocationQuery):
             field = AnyField()
         self.field = field
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         return any(
             word.startswith(self.prefix.lower()) and word != self.prefix.lower()
             for word in self.field.get_field_words(sub)
         )
 
-    def match_locations(self, sub: FASubmissionFull) -> List[MatchLocation]:
+    def match_locations(self, sub: QueryTarget) -> list[MatchLocation]:
         regex = re.compile(
             boundary_pattern_start + re.escape(self.prefix) + not_punctuation_pattern + boundary_pattern_end,
             re.I,
@@ -363,13 +358,13 @@ class SuffixQuery(LocationQuery):
             field = AnyField()
         self.field = field
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         return any(
             word.endswith(self.suffix.lower()) and word != self.suffix.lower()
             for word in self.field.get_field_words(sub)
         )
 
-    def match_locations(self, sub: FASubmissionFull) -> List[MatchLocation]:
+    def match_locations(self, sub: QueryTarget) -> list[MatchLocation]:
         regex = re.compile(
             boundary_pattern_start + not_punctuation_pattern + re.escape(self.suffix) + boundary_pattern_end,
             re.I,
@@ -401,10 +396,10 @@ class RegexQuery(LocationQuery):
             field = AnyField()
         self.field = field
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         return any(self.pattern.search(word) for word in self.field.get_field_words(sub))
 
-    def match_locations(self, sub: FASubmissionFull) -> List[MatchLocation]:
+    def match_locations(self, sub: QueryTarget) -> list[MatchLocation]:
         return [
             MatchLocation(location, m.start(), m.end())
             for location, text in self.field.get_texts_dict(sub).items()
@@ -445,10 +440,10 @@ class PhraseQuery(LocationQuery):
             field = AnyField()
         self.field = field
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         return any(self.phrase_regex.search(text) for text in self.field.get_texts(sub))
 
-    def match_locations(self, sub: FASubmissionFull) -> List[MatchLocation]:
+    def match_locations(self, sub: QueryTarget) -> list[MatchLocation]:
         return [
             MatchLocation(location, m.start(), m.end())
             for location, text in self.field.get_texts_dict(sub).items()
@@ -474,7 +469,7 @@ class ExceptionQuery(Query):
         self.word = word
         self.exception = exception
 
-    def matches_submission(self, sub: FASubmissionFull) -> bool:
+    def matches_submission(self, sub: QueryTarget) -> bool:
         word_locations = self.word.match_locations(sub)
         exception_locations = self.exception.match_locations(sub)
         return any(not location.overlaps_any(exception_locations) for location in word_locations)

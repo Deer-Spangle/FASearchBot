@@ -2,7 +2,8 @@ import datetime
 
 import pytest
 
-from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull, FAUser, Rating
+from fa_search_bot.sites.furaffinity.fa_submission import FASubmissionFull, FAUser
+from fa_search_bot.sites.submission import Rating
 from fa_search_bot.tests.util.submission_builder import SubmissionBuilder
 
 
