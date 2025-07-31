@@ -14,7 +14,8 @@ from fa_search_bot.subscriptions.subscription import Subscription
 if TYPE_CHECKING:
     from typing import List
 
-    from fa_search_bot.subscriptions.subscription_watcher import SubscriptionWatcher
+    from fa_search_bot.subscriptions.subscription_watcher import SubscriptionWatcher, SubscriptionAlreadyPaused, \
+    SubscriptionAlreadyRunning
 
 logger = logging.getLogger(__name__)
 
@@ -87,16 +88,14 @@ class SubscriptionFunctionality(BotFunctionality):
             return f"Failed to parse subscription query: {html.escape(str(e))}"
         if new_sub in self.watcher.subscriptions:
             return f'A subscription already exists for "{html.escape(query)}".'
-        self.watcher.subscriptions.add(new_sub)
-        self.watcher.save_to_json()
+        self.watcher.add_subscription(new_sub)
         return f'Added subscription: "{html.escape(query)}".\n{self._list_subs(destination)}'
 
     def _remove_sub(self, destination: int, query: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_REMOVE).inc()
         old_sub = Subscription(query, destination)
         try:
-            self.watcher.subscriptions.remove(old_sub)
-            self.watcher.save_to_json()
+            self.watcher.remove_subscription(old_sub)
             return f'Removed subscription: "{html.escape(query)}".\n{self._list_subs(destination)}'
         except KeyError:
             return f'There is not a subscription for "{html.escape(query)}" in this chat.'
@@ -116,52 +115,44 @@ class SubscriptionFunctionality(BotFunctionality):
 
     def _pause_destination(self, chat_id: int) -> str:
         self.usage_counter.labels(function=self.USE_CASE_PAUSE_DEST).inc()
-        subs = [sub for sub in self.watcher.subscriptions if sub.destination == chat_id]
-        if not subs:
+        try:
+            self.watcher.pause_destination(chat_id)
+        except KeyError:
             return "There are no subscriptions posting here to pause."
-        running_subs = [sub for sub in subs if sub.paused is False]
-        if not running_subs:
+        except SubscriptionAlreadyPaused:
             return "All subscriptions are already paused."
-        for sub in running_subs:
-            sub.paused = True
-        self.watcher.save_to_json()
         return f"Paused all subscriptions.\n{self._list_subs(chat_id)}"
 
     def _pause_subscription(self, chat_id: int, sub_name: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_PAUSE_SUB).inc()
         pause_sub = Subscription(sub_name, chat_id)
-        if pause_sub not in self.watcher.subscriptions:
+        try:
+            self.watcher.pause_subscription(pause_sub)
+        except KeyError:
             return f'There is not a subscription for "{html.escape(sub_name)}" in this chat.'
-        matching = [sub for sub in self.watcher.subscriptions if sub == pause_sub][0]
-        if matching.paused:
+        except SubscriptionAlreadyPaused:
             return f'Subscription for "{html.escape(sub_name)}" is already paused.'
-        matching.paused = True
-        self.watcher.save_to_json()
         return f'Paused subscription: "{html.escape(sub_name)}".\n{self._list_subs(chat_id)}'
 
     def _resume_destination(self, chat_id: int) -> str:
         self.usage_counter.labels(function=self.USE_CASE_RESUME_DEST).inc()
-        subs = [sub for sub in self.watcher.subscriptions if sub.destination == chat_id]
-        if not subs:
+        try:
+            self.watcher.resume_destination(chat_id)
+        except KeyError:
             return "There are no subscriptions posting here to resume."
-        running_subs = [sub for sub in subs if sub.paused is True]
-        if not running_subs:
+        except SubscriptionAlreadyRunning:
             return "All subscriptions are already running."
-        for sub in running_subs:
-            sub.paused = False
-        self.watcher.save_to_json()
         return f"Resumed all subscriptions.\n{self._list_subs(chat_id)}"
 
     def _resume_subscription(self, chat_id: int, sub_name: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_RESUME_SUB).inc()
         pause_sub = Subscription(sub_name, chat_id)
-        if pause_sub not in self.watcher.subscriptions:
+        try:
+            self.watcher.resume_subscription(pause_sub)
+        except KeyError:
             return f'There is not a subscription for "{html.escape(sub_name)}" in this chat.'
-        matching = [sub for sub in self.watcher.subscriptions if sub == pause_sub][0]
-        if not matching.paused:
+        except SubscriptionAlreadyRunning:
             return f'Subscription for "{html.escape(sub_name)}" is already running.'
-        matching.paused = False
-        self.watcher.save_to_json()
         return f'Resumed subscription: "{html.escape(sub_name)}".\n{self._list_subs(chat_id)}'
 
 
@@ -221,8 +212,7 @@ class BlocklistFunctionality(BotFunctionality):
     def _remove_from_blocklist(self, destination: int, query: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_REMOVE).inc()
         try:
-            self.watcher.blocklists[destination].remove(query)
-            self.watcher.save_to_json()
+            self.watcher.remove_from_blocklist(destination, query)
             return f'Removed tag from blocklist: "{query}".\n{self._list_blocklisted_tags(destination)}'
         except KeyError:
             return f'The tag "{query}" is not on the blocklist for this chat.'
