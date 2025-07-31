@@ -7,19 +7,21 @@ import json
 import logging
 import os
 from asyncio import Task
+from concurrent.futures import ProcessPoolExecutor
 from typing import TYPE_CHECKING
 
 from prometheus_client import Gauge
 
 from fa_search_bot.config import SubscriptionWatcherConfig
+from fa_search_bot.subscriptions.media_downloader import MediaDownloader
+from fa_search_bot.subscriptions.media_uploader import MediaUploader
 from fa_search_bot.subscriptions.runnable import ShutdownError
-from fa_search_bot.subscriptions.query_parser import parse_query, Query, AndQuery, NotQuery
+from fa_search_bot.subscriptions.query_parser import Query
 from fa_search_bot.sites.submission_id import SubmissionID
 from fa_search_bot.subscriptions.data_fetcher import DataFetcher
-from fa_search_bot.subscriptions.media_fetcher import MediaFetcher
 from fa_search_bot.subscriptions.sender import Sender
 from fa_search_bot.subscriptions.sub_id_gatherer import SubIDGatherer
-from fa_search_bot.subscriptions.subscription import Subscription
+from fa_search_bot.subscriptions.subscription import Subscription, DestinationBlocklist
 from fa_search_bot.subscriptions.wait_pool import WaitPool
 
 if TYPE_CHECKING:
@@ -53,6 +55,10 @@ gauge_wait_pool_size = Gauge(
     "fasearchbot_fasubwatcher_wait_pool_size",
     "Total number of submissions in the wait pool",
 )
+gauge_wait_pool_active_size = Gauge(
+    "fasearchbot_fasubwatcher_wait_pool_active_size",
+    "Total number of submissions in the active wait pool",
+)
 gauge_fetch_queue_size = Gauge(
     "fasearchbot_fasubwatcher_fetch_data_queue_size",
     "Total number of submission IDs in the fetch data queue",
@@ -60,9 +66,17 @@ gauge_fetch_queue_size = Gauge(
 )
 gauge_fetch_queue_new_size = gauge_fetch_queue_size.labels(sub_queue="new")
 gauge_fetch_queue_refresh_size = gauge_fetch_queue_size.labels(sub_queue="refresh")
+gauge_download_queue_size = Gauge(
+    "fasearchbot_fasubwatcher_download_queue_size",
+    "Total number of submissions which are ready for media download",
+)
 gauge_upload_queue_size = Gauge(
     "fasearchbot_fasubwatcher_upload_queue_size",
-    "Total number of submissions in the upload queue",
+    "Total number of submissions which are ready for media upload",
+)
+gauge_send_queue_size = Gauge(
+    "fasearchbot_fasubwatcher_send_queue_size",
+    "Total number of submissions which are ready to be sent",
 )
 gauge_running_data_fetcher_count = Gauge(
     "fasearchbot_fasubwatcher_running_data_fetcher_count",
@@ -72,13 +86,21 @@ gauge_expected_data_fetcher_count = Gauge(
     "fasearchbot_fasubwatcher_expected_data_fetcher_count",
     "Number of expected data fetcher tasks which should be running",
 )
-gauge_running_media_fetcher_count = Gauge(
-    "fasearchbot_fasubwatcher_running_media_fetcher_count",
-    "Number of running media fetcher tasks",
+gauge_running_media_downloader_count = Gauge(
+    "fasearchbot_fasubwatcher_running_media_downloader_count",
+    "Number of running media downloader tasks",
 )
-gauge_expected_media_fetcher_count = Gauge(
-    "fasearchbot_fasubwatcher_expected_media_fetcher_count",
-    "Number of expected media fetcher tasks which should be running",
+gauge_expected_media_downloader_count = Gauge(
+    "fasearchbot_fasubwatcher_expected_media_downloader_count",
+    "Number of expected media downloader tasks which should be running",
+)
+gauge_running_media_uploader_count = Gauge(
+    "fasearchbot_fasubwatcher_running_media_uploader_count",
+    "Number of running media uploader tasks",
+)
+gauge_expected_media_uploader_count = Gauge(
+    "fasearchbot_fasubwatcher_expected_media_uploader_count",
+    "Number of expected media uploader tasks which should be running",
 )
 gauge_running_task_count = Gauge(
     "fasearchbot_fasubwatcher_running_task_count",
@@ -114,18 +136,21 @@ class SubscriptionWatcher:
         # Initialise stored data structures
         self.latest_ids: Deque[str] = collections.deque(maxlen=15)
         self.subscriptions: Set[Subscription] = set()
-        self.blocklists: Dict[int, Set[str]] = dict()
-        self.blocklist_query_cache: Dict[str, Query] = dict()
+        self.blocklists: dict[int, DestinationBlocklist] = dict()
 
         # Initialise sharing data structures
-        self.wait_pool = WaitPool()
+        self.wait_pool = WaitPool(self.config.max_ready_for_upload)
 
         # Initialise runners and tasks
         self.sub_id_gatherer: Optional[SubIDGatherer] = None
-        self.data_fetchers: List[DataFetcher] = []
-        self.media_fetchers: List[MediaFetcher] = []
+        self.data_fetchers: list[DataFetcher] = []
+        self.media_downloaders: list[MediaDownloader] = []
+        self.media_uploaders: list[MediaUploader] = []
         self.sender: Optional[Sender] = None
         self.sub_tasks: List[Task] = []
+
+        # Initialise the subscription checker process pool
+        self.checker_executor = ProcessPoolExecutor(2)
 
         # Initialise gauges and prometheus metrics
         self.latest_observed_submission: Optional[datetime.datetime] = None
@@ -135,17 +160,22 @@ class SubscriptionWatcher:
         gauge_sub_active_destinations.set_function(
             lambda: len(set(s.destination for s in self.subscriptions if not s.paused))
         )
-        gauge_sub_blocks.set_function(lambda: sum(len(blocks) for blocks in self.blocklists.values()))
+        gauge_sub_blocks.set_function(lambda: sum(blocklist.count_blocks() for blocklist in self.blocklists.values()))
         gauge_wait_pool_size.set_function(lambda: self.wait_pool.size())
+        gauge_wait_pool_active_size.set_function(lambda: self.wait_pool.size_active())
         gauge_fetch_queue_new_size.set_function(lambda: self.wait_pool.qsize_fetch_new())
         gauge_fetch_queue_refresh_size.set_function(lambda: self.wait_pool.qsize_fetch_refresh())
+        gauge_download_queue_size.set_function(lambda: self.wait_pool.qsize_download())
         gauge_upload_queue_size.set_function(lambda: self.wait_pool.qsize_upload())
+        gauge_send_queue_size.set_function(lambda: self.wait_pool.qsize_send())
         gauge_running_data_fetcher_count.set_function(lambda: len([f for f in self.data_fetchers if f.running]))
         gauge_expected_data_fetcher_count.set(self.config.num_data_fetchers)
-        gauge_running_media_fetcher_count.set_function(lambda: len([f for f in self.media_fetchers if f.running]))
-        gauge_expected_media_fetcher_count.set(self.config.num_media_fetchers)
+        gauge_running_media_downloader_count.set_function(lambda: len([f for f in self.media_downloaders if f.running]))
+        gauge_expected_media_downloader_count.set(self.config.num_media_downloaders)
+        gauge_running_media_uploader_count.set_function(lambda: len([f for f in self.media_uploaders if f.running]))
+        gauge_expected_media_uploader_count.set(self.config.num_media_uploaders)
         gauge_running_task_count.set_function(lambda: len([t for t in self.sub_tasks if not t.done()]))
-        gauge_expected_task_count.set(2 + self.config.num_data_fetchers + self.config.num_media_fetchers)
+        gauge_expected_task_count.set(2 + self.config.total_num_task_runners())
 
     def start_tasks(self) -> None:
         if self.sub_tasks:
@@ -161,12 +191,18 @@ class SubscriptionWatcher:
             self.data_fetchers.append(data_fetcher)
             data_fetcher_task = event_loop.create_task(data_fetcher.run())
             self.sub_tasks.append(data_fetcher_task)
-        # Start the media fetchers
-        for _ in range(self.config.num_media_fetchers):
-            media_fetcher = MediaFetcher(self)
-            self.media_fetchers.append(media_fetcher)
-            media_fetcher_task = event_loop.create_task(media_fetcher.run())
-            self.sub_tasks.append(media_fetcher_task)
+        # Start the media downloaders
+        for _ in range(self.config.num_media_downloaders):
+            media_downloader = MediaDownloader(self)
+            self.media_downloaders.append(media_downloader)
+            media_downloader_task = event_loop.create_task(media_downloader.run())
+            self.sub_tasks.append(media_downloader_task)
+        # Start the media uploaders
+        for _ in range(self.config.num_media_uploaders):
+            media_uploader = MediaUploader(self)
+            self.media_uploaders.append(media_uploader)
+            media_uploader_task = event_loop.create_task(media_uploader.run())
+            self.sub_tasks.append(media_uploader_task)
         # Start the submission sender
         self.sender = Sender(self)
         task_sender = event_loop.create_task(self.sender.run())
@@ -181,9 +217,12 @@ class SubscriptionWatcher:
         for data_fetcher in self.data_fetchers:
             logger.debug("Stopping data fetcher")
             data_fetcher.stop()
-        for media_fetcher in self.media_fetchers:
-            logger.debug("Stopping media fetcher")
-            media_fetcher.stop()
+        for media_downloader in self.media_downloaders:
+            logger.debug("Stopping media downloader")
+            media_downloader.stop()
+        for media_uploader in self.media_uploaders:
+            logger.debug("Stopping media uploader")
+            media_uploader.stop()
         if self.sender:
             logger.debug("Stopping sender")
             self.sender.stop()
@@ -201,7 +240,8 @@ class SubscriptionWatcher:
             self.sub_tasks.remove(task)
         # Clean up fetchers
         self.data_fetchers.clear()
-        self.media_fetchers.clear()
+        self.media_downloaders.clear()
+        self.media_uploaders.clear()
         logger.info("Subscription watcher shutdown complete")
 
     def update_latest_observed(self, post_datetime: datetime.datetime) -> None:
@@ -213,38 +253,56 @@ class SubscriptionWatcher:
         self.latest_ids.append(sub_id.submission_id)
         self.save_to_json()
 
-    def get_blocklist_query(self, blocklist_str: str) -> Query:
-        if blocklist_str not in self.blocklist_query_cache:
-            self.blocklist_query_cache[blocklist_str] = parse_query(blocklist_str)
-        return self.blocklist_query_cache[blocklist_str]
-
     def add_to_blocklist(self, destination: int, tag: str) -> None:
-        # Ensure blocklist query can be parsed without error
-        self.blocklist_query_cache[tag] = parse_query(tag)
         # Add to blocklists
         if destination in self.blocklists:
+            # This will parse it too, hence validating it
             self.blocklists[destination].add(tag)
         else:
-            self.blocklists[destination] = {tag}
+            self.blocklists[destination] = DestinationBlocklist.from_query(destination, tag)
 
-    def check_subscriptions(self, full_result: FASubmissionFull) -> List[Subscription]:
+    @staticmethod
+    def _check_subscriptions_static(
+            subscriptions: set[Subscription],
+            blocklists: dict[int, DestinationBlocklist],
+            full_result: FASubmissionFull,
+    ) -> list[Subscription]:
         # Copy subscriptions, to avoid "changed size during iteration" issues
-        subscriptions = self.subscriptions.copy()
+        subscriptions = subscriptions.copy()
         # Check which subscriptions match
         matching_subscriptions = []
         for subscription in subscriptions:
-            blocklist = self.blocklists.get(subscription.destination, set())
-            blocklist_query = AndQuery(
-                [NotQuery(self.get_blocklist_query(block)) for block in blocklist]
-            )
+            blocklist = blocklists.get(subscription.destination)
+            blocklist_query: Optional[Query] = None
+            if blocklist is not None:
+                blocklist_query = blocklist.as_combined_query()
             if subscription.matches_result(full_result, blocklist_query):
                 matching_subscriptions.append(subscription)
         return matching_subscriptions
 
+    async def check_subscriptions(
+            self,
+            full_result: FASubmissionFull,
+            subscriptions: Optional[list[Subscription]] = None,
+    ) -> list[Subscription]:
+        if subscriptions is None:
+            subscriptions = self.subscriptions
+        else:
+            subscriptions = list(set(subscriptions).intersection(self.subscriptions))
+        return self._check_subscriptions_static(subscriptions, self.blocklists, full_result)
+        # loop = asyncio.get_running_loop()
+        # return await loop.run_in_executor(
+        #     self.checker_executor,
+        #     self._check_subscriptions_static,
+        #     self.subscriptions,
+        #     self.blocklists,
+        #     full_result,
+        # )
+
     def migrate_chat(self, old_chat_id: int, new_chat_id: int) -> None:
         # Migrate blocklist
         if old_chat_id in self.blocklists:
-            for query in self.blocklists[old_chat_id]:
+            for query in self.blocklists[old_chat_id].blocklists.keys():
                 self.add_to_blocklist(new_chat_id, query)
         # Migrate subscriptions
         for subscription in self.subscriptions.copy():
@@ -266,9 +324,8 @@ class SubscriptionWatcher:
         )
         for subscription in self.subscriptions.copy():
             destination_dict[str(subscription.destination)]["subscriptions"].append(subscription.to_json())
-        for dest, block_queries in self.blocklists.items():
-            for block in block_queries:
-                destination_dict[str(dest)]["blocks"].append({"query": block})
+        for dest_blocklist in self.blocklists.values():
+            destination_dict[str(dest_blocklist.destination)]["blocks"] = dest_blocklist.to_json()
         data = {"latest_ids": list(self.latest_ids), "destinations": destination_dict}
         with open(self.FILENAME_TEMP, "w") as f:
             json.dump(data, f, indent=2)
@@ -313,7 +370,7 @@ class SubscriptionWatcher:
             for subscription in value["subscriptions"]:
                 subscriptions.add(Subscription.from_json_new_format(subscription, dest_id))
             if value["blocks"]:
-                new_watcher.blocklists[dest_id] = set(block["query"] for block in value["blocks"])
+                new_watcher.blocklists[dest_id] = DestinationBlocklist.from_json(dest_id, value["blocks"])
         logger.debug(f"Loaded {len(subscriptions)} subscriptions")
         new_watcher.subscriptions = subscriptions
         return new_watcher

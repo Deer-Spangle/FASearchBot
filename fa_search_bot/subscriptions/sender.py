@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import collections
 import datetime
 import logging
 from typing import Union, Dict, List, Optional, TYPE_CHECKING
 
-from prometheus_client import Counter, Summary
+from prometheus_client import Counter, Summary, Histogram
 from telethon.errors import UserIsBlockedError, InputUserDeactivatedError, ChannelPrivateError, PeerIdInvalidError, FloodWaitError
 from telethon.errors.rpcerrorlist import FilePartMissingError, FilePart0MissingError
 from telethon.tl.types import TypeInputPeer
@@ -14,7 +13,7 @@ from telethon.tl.types import TypeInputPeer
 from fa_search_bot.sites.furaffinity.sendable import SendableFASubmission
 from fa_search_bot.subscriptions.runnable import Runnable
 from fa_search_bot.subscriptions.subscription import Subscription
-from fa_search_bot.subscriptions.utils import time_taken
+from fa_search_bot.subscriptions.utils import time_taken, TimeKeeper
 from fa_search_bot.subscriptions.wait_pool import SubmissionCheckState
 
 if TYPE_CHECKING:
@@ -27,6 +26,9 @@ time_taken_reading_queue = time_taken.labels(
     task="reading wait-pool for new data", runnable="Sender", task_type="active"
 )
 time_taken_waiting = time_taken.labels(task="waiting for new events in queue", runnable="Sender", task_type="waiting")
+time_taken_checking_matches = time_taken.labels(
+    task="checking whether submission matches subscriptions", runnable="Sender", task_type="active",
+)
 time_taken_sending_messages = time_taken.labels(
     task="sending messages to subscriptions", runnable="Sender", task_type="active"
 )
@@ -57,6 +59,24 @@ updates_sent_cache = total_updates_sent.labels(media_type="cached")
 updates_sent_fresh_cache = total_updates_sent.labels(media_type="fresh_cache")
 updates_sent_upload = total_updates_sent.labels(media_type="upload")
 updates_sent_re_upload = total_updates_sent.labels(media_type="re_upload")
+send_attempts_needed = Histogram(
+    "fasearchbot_subscriptionsender_sender_attempts_needed",
+    "How many attempts were needed to successfully send a message to a chat on Telegram",
+    buckets=[0, 1, 2, 3, 4, 5, 10],
+    labelnames=["result"],
+)
+send_attempts_needed_success = send_attempts_needed.labels(result="success")
+send_attempts_needed_failed = send_attempts_needed.labels(result="failed")
+send_attempts_needed_file_part_mising = send_attempts_needed.labels(result="file_part_missing")
+send_attempts_needed_blocked = send_attempts_needed.labels(result="blocked")
+single_message_send_timer = Summary(
+    "fasearchbot_subscriptionsender_single_message_send_time_taken",
+    "Amount of time taken (in seconds) to send a submission to a single chat which is subscribed to it",
+)
+
+
+class MediaMissing(Exception):
+    pass
 
 
 class Sender(Runnable):
@@ -72,37 +92,47 @@ class Sender(Runnable):
             next_state = await self.watcher.wait_pool.pop_next_ready_to_send()
         if not next_state:
             with time_taken_waiting.time():
-                await asyncio.sleep(self.QUEUE_BACKOFF)
+                await self._wait_while_running(self.QUEUE_BACKOFF)
             return
         self.last_state = next_state
         logger.debug("Got submission ready to send: %s", next_state.sub_id)
         # Send out messages
-        with time_taken_sending_messages.time():
-            await self._send_updates(next_state)
-        logger.debug("Sent messages for submission %s", next_state.sub_id)
+        await self._send_updates(next_state)
         # Log the posting date of the latest sent submission
         self.watcher.update_latest_observed(next_state.full_data.posted_at)
         # Update latest ids with the submission we just checked, and save config
         with time_taken_saving_config.time():
             self.watcher.update_latest_id(next_state.sub_id)
+        self.latest_id_gauge.set(next_state.sub_id.submission_id)
 
     async def _send_updates(self, state: SubmissionCheckState) -> None:
         sendable = SendableFASubmission(state.full_data)
-        # Get subscriptions list again, because it might have changed since DataFetcher checked
-        subscriptions = self.watcher.check_subscriptions(state.full_data)
-        # Map which subscriptions require this submission at each destination
-        destination_map: Dict[int, List[Subscription]] = collections.defaultdict(lambda: [])
-        for sub in subscriptions:
-            sub.latest_update = datetime.datetime.now()
-            destination_map[sub.destination].append(sub)
+        # Check subscriptions
+        with time_taken_checking_matches.time():
+            # Check the previously-matched subscriptions again, in case any have been removed or blocklists have changed
+            subscriptions = await self.watcher.check_subscriptions(state.full_data, state.matching_subscriptions)
+            # Map which subscriptions require this submission at each destination
+            destination_map: Dict[int, List[Subscription]] = collections.defaultdict(lambda: [])
+            for sub in subscriptions:
+                sub.latest_update = datetime.datetime.now()
+                destination_map[sub.destination].append(sub)
         # Send the submission to each location
-        for dest, subs in destination_map.items():
-            if dest in state.sent_to:
-                # Already sent to that destination, skip
-                continue
-            queries = ", ".join([f'"{sub.query_str}"' for sub in subs])
-            prefix = f"Update on {queries} subscription{'' if len(subs) == 1 else 's'}:"
-            await self._try_send_subscription_update(sendable, state, dest, prefix)
+        send_all_timer = TimeKeeper(time_taken_sending_messages)
+        with send_all_timer.time():
+            for dest, subs in destination_map.items():
+                if dest in state.sent_to:
+                    # Already sent to that destination, skip
+                    continue
+                queries = ", ".join([f'"{sub.query_str}"' for sub in subs])
+                prefix = f"Update on {queries} subscription{'' if len(subs) == 1 else 's'}:"
+                send_one_timer = TimeKeeper(single_message_send_timer)
+                with send_one_timer.time():
+                    await self._try_send_subscription_update(sendable, state, dest, prefix)
+                logger.debug(
+                    "Sent submission %s to destination for %s subscriptions, duration: %s",
+                    state.sub_id, len(subs), send_one_timer.duration
+                )
+        logger.debug("Sent messages for submission %s, duration: %s", state.sub_id, send_all_timer.duration)
 
     async def _try_send_subscription_update(
         self,
@@ -119,6 +149,7 @@ class Sender(Runnable):
             try:
                 await self._send_subscription_update(sendable, state, chat, prefix)
                 state.sent_to.append(chat)
+                send_attempts_needed_success.observe(send_attempt)
                 return
             except (UserIsBlockedError, InputUserDeactivatedError, ChannelPrivateError, PeerIdInvalidError):
                 sub_blocked.inc()
@@ -126,6 +157,7 @@ class Sender(Runnable):
                 all_subs = [sub for sub in self.watcher.subscriptions if sub.destination == chat]
                 for sub in all_subs:
                     sub.paused = True
+                send_attempts_needed_blocked.observe(send_attempt)
                 return
             except FloodWaitError as e:
                 seconds = e.seconds
@@ -141,7 +173,15 @@ class Sender(Runnable):
                     sendable.submission_id,
                 )
                 await self.watcher.wait_pool.revert_data_fetch(sendable.submission_id)
+                send_attempts_needed_file_part_mising.observe(send_attempt)
                 return
+            except MediaMissing as e:
+                sub_update_send_failures.inc()
+                logger.warning(
+                    "Submission %s presented to Sender does not have uploaded or cached media. Resetting cache and retrying",
+                    sendable.submission_id,
+                )
+                await self.watcher.wait_pool.revert_data_fetch(sendable.submission_id)
             except Exception as e:
                 sub_update_send_failures.inc()
                 logger.error(
@@ -150,6 +190,7 @@ class Sender(Runnable):
                     chat,
                     exc_info=e,
                 )
+                send_attempts_needed_failed.observe(send_attempt)
                 raise e
 
     async def _send_subscription_update(
@@ -172,7 +213,11 @@ class Sender(Runnable):
                     updates_sent_fresh_cache.inc()
                     await self.watcher.wait_pool.set_cached(state.sub_id, cache_entry)
                     return
+            # If there's no uploaded media, and no cache entry, this should not have gotten to the Sender
+            # Previously, we passed None to sendable.send_message() so that it would handle download and upload, but it
+            # should not have gotten this far, so send it back.
             updates_sent_re_upload.inc()
+            raise MediaMissing()
         else:
             updates_sent_upload.inc()
         # Send message

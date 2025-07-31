@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from asyncio import QueueEmpty
 from typing import Optional, TYPE_CHECKING
@@ -89,7 +88,7 @@ class DataFetcher(Runnable):
             sub_id = await self.watcher.wait_pool.get_next_for_data_fetch()
         except QueueEmpty:
             with time_taken_queue_waiting.time():
-                await asyncio.sleep(self.QUEUE_BACKOFF)
+                await self._wait_while_running(self.QUEUE_BACKOFF)
             return
         self.last_sub_id = sub_id
         # Fetch data
@@ -101,17 +100,19 @@ class DataFetcher(Runnable):
         counter_subs_found.inc()
         # See if any subscriptions match the submission
         with time_taken_checking_matches.time():
-            matching_subscriptions = self.watcher.check_subscriptions(full_result)
+            matching_subscriptions = await self.watcher.check_subscriptions(full_result)
         logger.debug("Submission %s matches %s subscriptions", sub_id, len(matching_subscriptions))
-        # Publish results
-        if matching_subscriptions:
-            sub_matches.inc()
-            sub_total_matches.inc(len(matching_subscriptions))
-            with time_taken_publishing.time():
-                await self.watcher.wait_pool.set_fetched_data(sub_id, full_result)
-        else:
+        # If submission doesn't match any subscriptions, drop it
+        if not matching_subscriptions:
             with time_taken_publishing.time():
                 await self.watcher.wait_pool.remove_state(sub_id)
+            return
+        # Publish results
+        sub_matches.inc()
+        sub_total_matches.inc(len(matching_subscriptions))
+        self.latest_id_gauge.set(sub_id.submission_id)
+        with time_taken_publishing.time():
+            await self.watcher.wait_pool.set_fetched_data(sub_id, full_result, matching_subscriptions)
 
     async def fetch_data(self, sub_id: SubmissionID) -> Optional[FASubmissionFull]:
         # Keep trying to fetch data, unless it is gone

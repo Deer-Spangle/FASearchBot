@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 import heartbeat
-from prometheus_client import Gauge, Counter
+from prometheus_client import Gauge, Counter, Summary
 
 from fa_search_bot.subscriptions.utils import time_taken
 
@@ -30,6 +30,16 @@ total_processed_count = Counter(
     "Count of how many times a task type has run its processing method",
     labelnames=["runnable"],
 )
+time_taken_processing = Summary(
+    "fasearchbot_subscriptiontask_do_process_time_taken",
+    "Amount of time taken (in seconds) running the do_process() method on each task runner",
+    labelnames=["runnable"],
+)
+latest_id_processed = Gauge(
+    "fasearchbot_subscriptiontask_latest_fa_id_processed",
+    "ID of the latest FA submission to be processed by each task runner",
+    labelnames=["runnable"],
+)
 
 
 class ShutdownError(RuntimeError):
@@ -47,6 +57,7 @@ class Runnable(ABC):
     def __init__(self, watcher: "SubscriptionWatcher"):
         self.watcher = watcher
         self.running = False
+        self._stop_event = asyncio.Event()
         self.heartbeat_expiry = datetime.datetime.now()
         self.class_name = self.__class__.__name__
         self.time_taken_updating_heartbeat = time_taken.labels(
@@ -54,13 +65,16 @@ class Runnable(ABC):
         )
         self.runnable_latest_processed = latest_processed_time.labels(runnable=self.class_name)
         self.runnable_processed_count = total_processed_count.labels(runnable=self.class_name)
+        self.time_taken_processing = time_taken_processing.labels(runnable=self.class_name)
+        self.latest_id_gauge = latest_id_processed.labels(runnable=self.class_name)
 
     async def run(self) -> None:
         # Start the subscription task
         self.running = True
         while self.running:
             try:
-                await self.do_process()
+                with self.time_taken_processing.time():
+                    await self.do_process()
             except Exception as e:
                 logger.error("Runnable task %s has failed (will restart) with exception:", self.class_name, exc_info=e)
                 # Revert the failed attempt, so it may be attempted again
@@ -68,7 +82,7 @@ class Runnable(ABC):
             # Update metrics
             self.update_processed_metrics()
             # Update heartbeat
-            self.update_heartbeat()
+            await self.update_heartbeat()
 
     @abstractmethod
     async def do_process(self) -> None:
@@ -84,21 +98,28 @@ class Runnable(ABC):
 
     def stop(self) -> None:
         self.running = False
+        self._stop_event.set()
+        self._stop_event.clear()
 
     def update_processed_metrics(self) -> None:
         self.runnable_latest_processed.set_to_current_time()
         self.runnable_processed_count.inc()
 
-    def update_heartbeat(self):
+    async def update_heartbeat(self):
         if datetime.datetime.now() > self.heartbeat_expiry:
             with self.time_taken_updating_heartbeat.time():
-                heartbeat.update_heartbeat(f"FASearchBot_task_{self.class_name}")
+                await asyncio.to_thread(lambda: heartbeat.update_heartbeat(f"FASearchBot_task_{self.class_name}"))
             logger.debug("Heartbeat from %s", self.class_name)
             self.heartbeat_expiry = datetime.datetime.now() + datetime.timedelta(seconds=self.SECONDS_PER_HEARTBEAT)
 
     async def _wait_while_running(self, seconds: float) -> None:
-        sleep_end = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
-        while datetime.datetime.now() < sleep_end:
-            if not self.running:
-                break
-            await asyncio.sleep(0.1)
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(self._stop_event.wait()),
+                asyncio.create_task(asyncio.sleep(seconds)),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        return

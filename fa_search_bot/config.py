@@ -4,6 +4,11 @@ import dataclasses
 import json
 from typing import Optional
 
+DEFAULT_NUM_DATA_FETCHERS = 2
+DEFAULT_NUM_MEDIA_DOWNLOADERS = 2
+DEFAULT_NUM_MEDIA_UPLOADERS = 1
+DEFAULT_MAX_READY_FOR_UPLOAD = 100    # Maximum number of submissions which should be ready for media upload, to prevent data being too stale by the time it comes to upload, especially if catching up on backlog
+
 
 @dataclasses.dataclass
 class TelegramConfig:
@@ -39,14 +44,21 @@ class WeasylConfig:
 class SubscriptionWatcherConfig:
     enabled: bool
     num_data_fetchers: int
-    num_media_fetchers: int
+    num_media_downloaders: int
+    num_media_uploaders: int
+    max_ready_for_upload: int
+
+    def total_num_task_runners(self) -> int:
+        return self.num_data_fetchers + self.num_media_downloaders + self.num_media_uploaders
 
     @classmethod
     def from_dict(cls, conf: dict) -> "SubscriptionWatcherConfig":
         return cls(
             enabled=conf.get("enabled", True),
-            num_data_fetchers=conf.get("num_data_fetchers", 2),
-            num_media_fetchers=conf.get("num_media_fetchers", 2),
+            num_data_fetchers=conf.get("num_data_fetchers", DEFAULT_NUM_DATA_FETCHERS),
+            num_media_downloaders=conf.get("num_media_downloaders", DEFAULT_NUM_MEDIA_DOWNLOADERS),
+            num_media_uploaders=conf.get("num_media_uploaders", DEFAULT_NUM_MEDIA_UPLOADERS),
+            max_ready_for_upload=conf.get("max_ready_for_upload", DEFAULT_MAX_READY_FOR_UPLOAD),
         )
 
 

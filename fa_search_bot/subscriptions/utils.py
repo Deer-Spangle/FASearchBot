@@ -1,6 +1,8 @@
+import logging
 from typing import List, Optional
 
 from prometheus_client import Summary
+from prometheus_client.context_managers import Timer
 
 from fa_search_bot.sites.furaffinity.fa_submission import FASubmission
 
@@ -10,6 +12,8 @@ time_taken = Summary(
     labelnames=["runnable", "task", "task_type"],
 )
 
+logger = logging.getLogger()
+
 
 def _latest_submission_in_list(submissions: List[FASubmission]) -> Optional[FASubmission]:
     if not submissions:
@@ -17,3 +21,17 @@ def _latest_submission_in_list(submissions: List[FASubmission]) -> Optional[FASu
     return max(submissions, key=lambda sub: int(sub.submission_id))
 
 
+class TimeKeeper:
+    def __init__(self, recorder: Summary, log_fmt: Optional[str] = None) -> None:
+        self.recorder = recorder
+        self.log_fmt = log_fmt
+        self.duration = None
+
+    def callback(self, duration: float) -> None:
+        self.recorder.observe(duration)
+        self.duration = duration
+        if self.log_fmt is not None:
+            logger.debug(self.log_fmt, duration)
+
+    def time(self) -> Timer:
+        return Timer(self.callback)

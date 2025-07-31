@@ -44,12 +44,15 @@ home_request_error = counter_home_requests.labels(result="error")
 class SubIDGatherer(Runnable):
     BROWSE_RETRY_BACKOFF = 20
     NEW_ID_BACKOFF = 20
+    NEW_ID_BACKOFF_BIG_BACKLOG = 60 * 4
+    BIG_BACKOFF_CUTOFF = 500
 
     def __init__(self, watcher: "SubscriptionWatcher"):
         super().__init__(watcher)
         self.latest_recorded_id: Optional[int] = None
         if self.watcher.latest_ids:
             self.latest_recorded_id = max(int(x) for x in self.watcher.latest_ids)
+        self.latest_id_gauge.set_function(lambda: self.latest_recorded_id)
 
     async def do_process(self) -> None:
         try:
@@ -66,7 +69,14 @@ class SubIDGatherer(Runnable):
                 await self.watcher.wait_pool.add_sub_id(sub_id)
         # Wait before checking for more
         with time_taken_waiting.time():
-            await self._wait_while_running(self.NEW_ID_BACKOFF)
+            pool_size = self.watcher.wait_pool.size()
+            if pool_size < self.BIG_BACKOFF_CUTOFF:
+                await self._wait_while_running(self.NEW_ID_BACKOFF)
+            else:
+                logger.debug(
+                    "Backlog is quite large (%s>%s). Will backoff for %ss before checking for new submission IDs",
+                    pool_size, self.BIG_BACKOFF_CUTOFF, self.NEW_ID_BACKOFF_BIG_BACKLOG)
+                await self._wait_while_running(self.NEW_ID_BACKOFF_BIG_BACKLOG)
 
     async def _get_new_results(self) -> List[FASubmission]:
         """
