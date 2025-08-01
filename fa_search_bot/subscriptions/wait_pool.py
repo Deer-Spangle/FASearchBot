@@ -76,11 +76,11 @@ class WaitPool:
     The sender is watching for the next item in the pool which is ready to send
     """
 
-    def __init__(self, max_ready_for_upload: int = DEFAULT_MAX_READY_FOR_UPLOAD) -> None:
+    def __init__(self, max_ready_for_upload: int = DEFAULT_MAX_READY_FOR_UPLOAD, fetch_refresh_limit: int = 100) -> None:
         self.max_ready_for_upload = max_ready_for_upload
         self.submission_state: Dict[SubmissionID, SubmissionCheckState] = {}
         self.active_states: Dict[SubmissionID, SubmissionCheckState] = {}
-        self.fetch_data_queue: FetchQueue = FetchQueue()
+        self.fetch_data_queue: FetchQueue = FetchQueue(fetch_refresh_limit)
         self._lock = Lock()
         self._media_uploading_event = Event()
         self._cache_qsize_download: Optional[int] = None
@@ -120,7 +120,9 @@ class WaitPool:
         # This reverts a submission back to before any data was fetched about it, and re-queues it for data fetch
         async with self._lock:
             if sub_id not in self.submission_state:
-                self.submission_state[sub_id] = SubmissionCheckState(sub_id)
+                new_sub_id = SubmissionCheckState(sub_id)
+                self.submission_state[sub_id] = new_sub_id
+                self.active_states[sub_id] = new_sub_id
             self.submission_state[sub_id].reset()
             # Don't remove from active states, that would risk a deadlock
             # Re-queue for data fetch refresh

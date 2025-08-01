@@ -9,7 +9,9 @@ import aiohttp
 import dateutil.parser
 from telethon import Button
 
-from fa_search_bot.sites.submission import Rating, QueryTarget
+from fa_search_bot.sites.submission import Rating
+from fa_search_bot.sites.submission_id import SubmissionID
+from fa_search_bot.subscriptions.query_target import QueryTarget
 
 if TYPE_CHECKING:
     import datetime
@@ -246,6 +248,7 @@ class FASubmissionFull(FASubmissionShort):
 
     def to_query_target(self) -> QueryTarget:
         return QueryTarget(
+            sub_id=SubmissionID("fa", self.submission_id),
             title=[self.title],
             keywords=self.keywords,
             description=[self.description],

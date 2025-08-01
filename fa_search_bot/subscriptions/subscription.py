@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 
 import dateutil.parser
 
-from fa_search_bot.sites.submission import QueryTarget
+from fa_search_bot.subscriptions.query_target import QueryTarget
 from fa_search_bot.subscriptions.query_parser import parse_query, Query, AndQuery, NotQuery
 
 
@@ -13,18 +13,23 @@ class DestinationBlocklist:
     def __init__(self, destination: int, blocklists: dict[str, Query]) -> None:
         self.destination = destination
         self.blocklists = blocklists
+        self._combined_query: Optional[Query] = None
 
     def count_blocks(self) -> int:
         return len(self.blocklists)
 
     def add(self, query: str) -> None:
         self.blocklists[query] = parse_query(query)
+        self._combined_query = None
 
     def remove(self, query: str) -> None:
         del self.blocklists[query]
+        self._combined_query = None
 
     def as_combined_query(self) -> Query:
-        return AndQuery([NotQuery(query) for query in self.blocklists.values()])
+        if self._combined_query is None:
+            self._combined_query = AndQuery([NotQuery(query) for query in self.blocklists.values()])
+        return self._combined_query
 
     def to_json(self) -> list[dict[str, str]]:
         return [{"query": query} for query in self.blocklists.keys()]
@@ -51,9 +56,11 @@ class Subscription:
         if self.paused:
             return False
         full_query = self.query
-        if blocklist_query:
-            full_query = AndQuery([self.query, blocklist_query])
-        return full_query.matches_submission(result)
+        if blocklist_query is not None:
+            # Checking this way, rather than constructing an AndQuery, is twice as fast.
+            return self.query.matches_submission(result) and blocklist_query.matches_submission(result)
+            # full_query = AndQuery([self.query, blocklist_query])
+        return self.query.matches_submission(result)
 
     def to_json(self) -> Dict:
         latest_update_str = None

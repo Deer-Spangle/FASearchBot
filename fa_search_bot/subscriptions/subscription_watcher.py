@@ -14,7 +14,7 @@ import aiofiles.os
 from prometheus_client import Gauge
 
 from fa_search_bot.config import SubscriptionWatcherConfig
-from fa_search_bot.sites.submission import QueryTarget
+from fa_search_bot.subscriptions.query_target import QueryTarget
 from fa_search_bot.subscriptions.media_downloader import MediaDownloader
 from fa_search_bot.subscriptions.media_uploader import MediaUploader
 from fa_search_bot.subscriptions.runnable import ShutdownError
@@ -148,7 +148,7 @@ class SubscriptionWatcher:
         self.blocklists: dict[int, DestinationBlocklist] = dict()
 
         # Initialise sharing data structures
-        self.wait_pool = WaitPool(self.config.max_ready_for_upload)
+        self.wait_pool = WaitPool(self.config.max_ready_for_upload, self.config.fetch_refresh_limit)
 
         # Initialise runners and tasks
         self.sub_id_gatherer: Optional[SubIDGatherer] = None
