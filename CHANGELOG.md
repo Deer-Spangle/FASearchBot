@@ -9,6 +9,17 @@ Changelog for FASearchBot, should include entries for these types of changes:
 - `Fixed` for any bug fixes.
 - `Security` in case of vulnerabilities. Format inspired by https://keepachangelog.com/en/1.0.0/
 
+## [1.16.0] - 2025-08-01
+
+### Changed
+- Split MediaFetcher into MediaDownloader and MediaUploader
+- Various tweaks and performance improvements
+- Lots and lots of internal improvements
+
+### Added
+- Lots of new metrics and logs
+- Added short commands for adding/listing/removing block queries
+
 ## [1.15.25] - 2025-06-09
 
 ### Fixed
