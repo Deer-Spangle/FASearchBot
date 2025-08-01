@@ -56,28 +56,28 @@ class SubscriptionFunctionality(BotFunctionality):
         message_text = event.text
         command = message_text.split()[0]
         args = message_text[len(command) :].strip()
-        await event.reply(self._route_command(event.chat_id, command, args), parse_mode="html")
+        await event.reply(await self._route_command(event.chat_id, command, args), parse_mode="html")
         raise StopPropagation
 
-    def _route_command(self, destination: int, command: str, args: str) -> str:
+    async def _route_command(self, destination: int, command: str, args: str) -> str:
         if command.startswith("/" + self.add_sub_cmd):
-            return self._add_sub(destination, args)
+            return await self._add_sub(destination, args)
         elif command.startswith("/" + self.remove_sub_cmd):
-            return self._remove_sub(destination, args)
+            return await self._remove_sub(destination, args)
         elif command.startswith("/" + self.list_sub_cmd):
             return self._list_subs(destination)
         elif any(command.startswith("/" + cmd) for cmd in self.pause_cmds):
             if args:
-                return self._pause_subscription(destination, args)
-            return self._pause_destination(destination)
+                return await self._pause_subscription(destination, args)
+            return await self._pause_destination(destination)
         elif any(command.startswith("/" + cmd) for cmd in self.resume_cmds):
             if args:
-                return self._resume_subscription(destination, args)
-            return self._resume_destination(destination)
+                return await self._resume_subscription(destination, args)
+            return await self._resume_destination(destination)
         else:
             return "I do not understand."
 
-    def _add_sub(self, destination: int, query: str) -> str:
+    async def _add_sub(self, destination: int, query: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_ADD).inc()
         if query == "":
             return "Please specify the subscription query you wish to add."
@@ -88,14 +88,14 @@ class SubscriptionFunctionality(BotFunctionality):
             return f"Failed to parse subscription query: {html.escape(str(e))}"
         if new_sub in self.watcher.subscriptions:
             return f'A subscription already exists for "{html.escape(query)}".'
-        self.watcher.add_subscription(new_sub)
+        await self.watcher.add_subscription(new_sub)
         return f'Added subscription: "{html.escape(query)}".\n{self._list_subs(destination)}'
 
-    def _remove_sub(self, destination: int, query: str) -> str:
+    async def _remove_sub(self, destination: int, query: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_REMOVE).inc()
         old_sub = Subscription(query, destination)
         try:
-            self.watcher.remove_subscription(old_sub)
+            await self.watcher.remove_subscription(old_sub)
             return f'Removed subscription: "{html.escape(query)}".\n{self._list_subs(destination)}'
         except KeyError:
             return f'There is not a subscription for "{html.escape(query)}" in this chat.'
@@ -113,42 +113,42 @@ class SubscriptionFunctionality(BotFunctionality):
         subs_list = "\n".join(sub_list_entries)
         return f"Current subscriptions in this chat:\n{subs_list}"
 
-    def _pause_destination(self, chat_id: int) -> str:
+    async def _pause_destination(self, chat_id: int) -> str:
         self.usage_counter.labels(function=self.USE_CASE_PAUSE_DEST).inc()
         try:
-            self.watcher.pause_destination(chat_id)
+            await self.watcher.pause_destination(chat_id)
         except KeyError:
             return "There are no subscriptions posting here to pause."
         except SubscriptionAlreadyPaused:
             return "All subscriptions are already paused."
         return f"Paused all subscriptions.\n{self._list_subs(chat_id)}"
 
-    def _pause_subscription(self, chat_id: int, sub_name: str) -> str:
+    async def _pause_subscription(self, chat_id: int, sub_name: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_PAUSE_SUB).inc()
         pause_sub = Subscription(sub_name, chat_id)
         try:
-            self.watcher.pause_subscription(pause_sub)
+            await self.watcher.pause_subscription(pause_sub)
         except KeyError:
             return f'There is not a subscription for "{html.escape(sub_name)}" in this chat.'
         except SubscriptionAlreadyPaused:
             return f'Subscription for "{html.escape(sub_name)}" is already paused.'
         return f'Paused subscription: "{html.escape(sub_name)}".\n{self._list_subs(chat_id)}'
 
-    def _resume_destination(self, chat_id: int) -> str:
+    async def _resume_destination(self, chat_id: int) -> str:
         self.usage_counter.labels(function=self.USE_CASE_RESUME_DEST).inc()
         try:
-            self.watcher.resume_destination(chat_id)
+            await self.watcher.resume_destination(chat_id)
         except KeyError:
             return "There are no subscriptions posting here to resume."
         except SubscriptionAlreadyRunning:
             return "All subscriptions are already running."
         return f"Resumed all subscriptions.\n{self._list_subs(chat_id)}"
 
-    def _resume_subscription(self, chat_id: int, sub_name: str) -> str:
+    async def _resume_subscription(self, chat_id: int, sub_name: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_RESUME_SUB).inc()
         pause_sub = Subscription(sub_name, chat_id)
         try:
-            self.watcher.resume_subscription(pause_sub)
+            await self.watcher.resume_subscription(pause_sub)
         except KeyError:
             return f'There is not a subscription for "{html.escape(sub_name)}" in this chat.'
         except SubscriptionAlreadyRunning:
@@ -190,29 +190,29 @@ class BlocklistFunctionality(BotFunctionality):
         command = message_text.split()[0]
         args = message_text[len(command) :].strip()
         if command.startswith("/" + self.add_block_tag_cmd) or command.startswith("/" + self.add_block_tag_cmd_short):
-            await event.reply(self._add_to_blocklist(destination, args))
+            await event.reply(await self._add_to_blocklist(destination, args))
         elif command.startswith("/" + self.remove_block_tag_cmd) or command.startswith("/" + self.remove_block_tag_cmd_short):
-            await event.reply(self._remove_from_blocklist(destination, args))
+            await event.reply(await self._remove_from_blocklist(destination, args))
         elif command.startswith("/" + self.list_block_tag_cmd) or command.startswith("/" + self.list_block_tag_cmd_short):
             await event.reply(self._list_blocklisted_tags(destination))
         else:
             await event.reply("I do not understand.")
         raise StopPropagation
 
-    def _add_to_blocklist(self, destination: int, query: str) -> str:
+    async def _add_to_blocklist(self, destination: int, query: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_ADD).inc()
         if query == "":
             return "Please specify the tag you wish to add to blocklist."
         try:
-            self.watcher.add_to_blocklist(destination, query)
+            await self.watcher.add_to_blocklist(destination, query)
         except InvalidQueryException as e:
             return f"Failed to parse blocklist query: {e}"
         return f'Added tag to blocklist: "{query}".\n{self._list_blocklisted_tags(destination)}'
 
-    def _remove_from_blocklist(self, destination: int, query: str) -> str:
+    async def _remove_from_blocklist(self, destination: int, query: str) -> str:
         self.usage_counter.labels(function=self.USE_CASE_REMOVE).inc()
         try:
-            self.watcher.remove_from_blocklist(destination, query)
+            await self.watcher.remove_from_blocklist(destination, query)
             return f'Removed tag from blocklist: "{query}".\n{self._list_blocklisted_tags(destination)}'
         except KeyError:
             return f'The tag "{query}" is not on the blocklist for this chat.'
