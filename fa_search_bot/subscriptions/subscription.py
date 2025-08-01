@@ -48,9 +48,11 @@ class Subscription:
     def __init__(self, query_str: str, destination: int):
         self.query_str = query_str
         self.destination = destination
-        self.latest_update = None  # type: Optional[datetime.datetime]
+        self.latest_update: Optional[datetime.datetime] = None
         self.query = parse_query(query_str)
         self.paused = False
+        self.creation_date: Optional[datetime.datetime] = None
+        self.creator_id: Optional[int] = None
 
     def matches_result(self, result: QueryTarget, blocklist_query: Optional[Query]) -> bool:
         if self.paused:
@@ -66,14 +68,19 @@ class Subscription:
         latest_update_str = None
         if self.latest_update is not None:
             latest_update_str = self.latest_update.isoformat()
+        creation_date_str = None
+        if self.creation_date is not None:
+            creation_date_str = self.creation_date.isoformat()
         return {
             "query": self.query_str,
             "latest_update": latest_update_str,
             "paused": self.paused,
+            "creation_date": creation_date_str,
+            "creator_id": self.creator_id,
         }
 
     @classmethod
-    def from_json_old_format(cls, saved_sub: Dict) -> "Subscription":
+    def from_json_old_format(cls, saved_sub: dict) -> "Subscription":
         query = saved_sub["query"]
         destination = saved_sub["destination"]
         new_sub = cls(query, destination)
@@ -83,7 +90,7 @@ class Subscription:
         return new_sub
 
     @classmethod
-    def from_json_new_format(cls, saved_sub: Dict, dest_id: int) -> "Subscription":
+    def from_json_new_format(cls, saved_sub: dict[str, Any], dest_id: int) -> "Subscription":
         query = saved_sub["query"]
         new_sub = cls(query, dest_id)
         new_sub.latest_update = None
@@ -91,6 +98,10 @@ class Subscription:
             new_sub.latest_update = dateutil.parser.parse(saved_sub["latest_update"])
         if saved_sub.get("paused"):
             new_sub.paused = True
+        if saved_sub.get("creation_date") is not None:
+            new_sub.creation_date = dateutil.parser.parse(saved_sub["creation_date"])
+        if saved_sub.get("creator_id") is not None:
+            new_sub.creator_id = saved_sub["creator_id"]
         return new_sub
 
     def __eq__(self, other: Any) -> bool:

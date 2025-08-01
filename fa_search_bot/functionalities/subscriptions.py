@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import html
 import logging
 import re
@@ -56,12 +57,12 @@ class SubscriptionFunctionality(BotFunctionality):
         message_text = event.text
         command = message_text.split()[0]
         args = message_text[len(command) :].strip()
-        await event.reply(await self._route_command(event.chat_id, command, args), parse_mode="html")
+        await event.reply(await self._route_command(event.chat_id, event.sender_id, command, args), parse_mode="html")
         raise StopPropagation
 
-    async def _route_command(self, destination: int, command: str, args: str) -> str:
+    async def _route_command(self, destination: int, sender_id: int, command: str, args: str) -> str:
         if command.startswith("/" + self.add_sub_cmd):
-            return await self._add_sub(destination, args)
+            return await self._add_sub(destination, args, sender_id)
         elif command.startswith("/" + self.remove_sub_cmd):
             return await self._remove_sub(destination, args)
         elif command.startswith("/" + self.list_sub_cmd):
@@ -77,7 +78,7 @@ class SubscriptionFunctionality(BotFunctionality):
         else:
             return "I do not understand."
 
-    async def _add_sub(self, destination: int, query: str) -> str:
+    async def _add_sub(self, destination: int, query: str, creator_id: int) -> str:
         self.usage_counter.labels(function=self.USE_CASE_ADD).inc()
         if query == "":
             return "Please specify the subscription query you wish to add."
@@ -86,6 +87,8 @@ class SubscriptionFunctionality(BotFunctionality):
         except InvalidQueryException as e:
             logger.error("Failed to parse new subscription query: %s", query, exc_info=e)
             return f"Failed to parse subscription query: {html.escape(str(e))}"
+        new_sub.creator_id = creator_id
+        new_sub.creation_date = datetime.datetime.now(tz=datetime.timezone.utc)
         if new_sub in self.watcher.subscriptions:
             return f'A subscription already exists for "{html.escape(query)}".'
         await self.watcher.add_subscription(new_sub)
